@@ -1,39 +1,8 @@
 var _ = require('underscore');
 
-var NUM_HOUSES = 5;
-
 var FAILURE = -1;
 
-var relations = [];
-
-function getAssignment() {
-    var slots = new Array(NUM_HOUSES);
-    for(var x = 0; x < NUM_HOUSES; x++) 
-        slots[x] = new house();
-    return slots;
-}
-
-
-
-// If one remaining value for all variables, success
-function isComplete(assignment) {
-    for(var i=0; i<assignment.length; i++) {
-        for(var vrb in assignment) {
-            var variable = assignment[vrb];
-            if(!variable || !(variable instanceof Array) 
-                    || variable.length !== 1)
-                return false;
-        }
-    }
-    return true;
-}
-
-
-
-
-
-
-////////// ACTUALLY RUN THE PROBLEM //////////
+////////// DEFINITIONS //////////
 var people = ["englishman", "spaniard", "norwegian", "ukrainian", "japanese"];
 var pets = ["dog", "zebra", "fox", "snail", "horse" ];
 var colors = ["green", "blue", "yellow", "red", "ivory"];
@@ -48,7 +17,14 @@ function constraint(t, r, s){this.type = t; this.force = r || function(){}; this
 var unary = new constraint(UNARY);
 var binary = new constraint(BINARY);
 var nary = new constraint(NARY);
+
+
 // ORDER CONSTRAINT ARRAY BY TYPE DURING EXECUTION!!!!!!  
+
+
+//#############################################
+/////// UTILITY FUNCTIONS ////////////////////
+//#############################################
 
 function getConstraint(scope, rel, optional) {
     var c = function(){};
@@ -61,9 +37,22 @@ function getConstraint(scope, rel, optional) {
     return c;
 }
 
+function isAssigned(dom) {
+    return dom.length == 1;
+}
 
-//// CONSTRAINT DEFINITIONS
-// 
+function getAssigned(vars) {
+    return _.chain(vars)
+        .filter(isAssigned)
+        .flatten().value();
+}
+
+//#############################################
+//// CONSTRAINT DEFINITIONS //////////////////
+//#############################################
+
+// function(scope, optional) return boolean
+
     var SAME = function(a, b) {
         return a === b;
     }
@@ -72,15 +61,27 @@ function getConstraint(scope, rel, optional) {
         return a === val;
     }
 
-    // global
+    // vars is an array of domain arrays!! 
     var ALL_DIFF = function(vars) {
-        var diff = true;
-        for(var i=0; i<vars.length-1; i++) 
-            diff = diff && vars[i]===vars[i+1];
-        return diff;
+        var modified = false;
+
+        // separate variables already assigned
+        var assigned = getAssigned(vars);
+        while(assigned.length !== 0) {
+            vars = _.chain(vars)
+                .reject(isAssigned) // remove them from original
+                .map(function(vDomain){
+                    return _.difference(vDomain, assigned);
+                }).value();
+
+            assigned = getAssigned(vars); // check again for singletons
+        }
     }
-// 
-///////////////////////////
+
+
+//#############################################
+////////// PROBLEM DEFINITION ////////////////
+//#############################################
   
 
 csp.prototype.solve = function() {
@@ -91,34 +92,23 @@ csp.prototype.solve = function() {
         alert("Solved!\n"+solution);
 }
 
+// are all variables assigned?
+csp.prototype.isComplete = function(assignment) {
+    return getAssigned().length === this.variables.length;
+}
+
 csp.prototype.backTrack(assignment) {
-    if(isComplete(assignment)) return assignment;
+    if(this.isComplete(assignment)) return assignment;
 
-    // TODO order this, or create function
-    var considered = getMostConstrainedVar(); 
+    var considered = getMostConstrainedVar(); // FIXME
 
-    // TODO order values by degrees of freedom
-    var value = this.variables[0];
-
-    // Will require dynamic behavior such that constraining values have been added to NEIGHBORS
     var snapshot = considered;
-    for(var val in this.domains) {
-        if(val in vDomain {
-            assignment[vrb] = snapshot.slice(val, val+1); // effectively sets the value
+    for(var val in this.domain) {
+        if(val in considered){
+            var inference = {};
+            assignment[considered.name] = _reject();
 
             // INFERENCE
-            try {
-                var revised = false;
-                while(revised) {
-                    // Go through and force all constraints
-                    for(cc in this.constraints) 
-                        revised = this.constraints[cc].force() || revised; // only revised if true
-                }
-            } catch(e) {
-                console.error(e); // either handle specifically or convert to boolean
-                // FIXME this is not correct, I would still have to revert changes before backtracking
-                return FAILURE;
-            }
             // END INFERENCE
 
         }
@@ -129,11 +119,6 @@ csp.prototype.backTrack(assignment) {
 }
 
 
-
-
-// TODO use _.reject to remove same the value from 
-
-// function(scope, optional) return boolean
 
 var constraints = [
     [ ["englishman", "red"], SAME ],
