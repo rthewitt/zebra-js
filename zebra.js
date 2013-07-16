@@ -25,17 +25,17 @@ var variables = [].concat(people, pets, colors, drinks, candies);
 //#############################################
 
 // Attempting to convert to hypergraph
-var ConstraintGraph = function (vertices, edges, directed) {
+var ConstraintGraph = function (vertices, directed) {
     this.vertices = vertices || [];
-    this.edges = edges || [];
     this.directed = directed || false;
 };
 
 // separate out into WeightedGraph in library
 // TODO require an ID on vertices/edges as a means of key
+// TODO add constraints/variables as array, for sorting purposes?
+// (currently using map on csp object)
 ConstraintGraph.prototype = {
     vertices: null,
-    edges: null,
     directed: false
 }
 
@@ -49,8 +49,8 @@ function _generateID () {
 var Vertex = function(info) {
     this.id = _generateID(); // HANDLE COLLISIONS
     this.info = info;
-    this.edges = []; // TODO handle removal case
     this.domain = [];
+    this.edges = [];
     this.constraints = [];
     this.connections = []; // TODO handle removal case maybe
 };
@@ -68,7 +68,6 @@ Vertex.prototype = {
             this.connections.push(assn.id);
             this.domain.push(assn);
             this.edges.push(assn);
-            //edges.push(assn);
         } else console.warn('Duplicate UUID found in addAssignment');
     },
     addConstraint: function(cnst) {
@@ -83,7 +82,8 @@ Vertex.prototype = {
 var Edge = {
     from: null,
     to: null,
-    weight: null,
+    weight: null, // represents flow, softness of constraints
+    capacity: null, // flow networks
     isValidEdge: function() {
         return this.to instanceof Array && this.to.length > 0 && 
             this.from instanceof Array && this.from.length > 0;
@@ -91,35 +91,32 @@ var Edge = {
 };
 
 var UNARY=1, BINARY=2, NARY=3;
-var Constraint = function(type, relation, scope) {
+// if graph ever becomes dynamic, we'll need to manage scope or rely on traversal
+// to determine variable dependence.  (Preferred)
+var Constraint = function(type, relation, scope, weight) {
     this.id = _generateID(); // HANDLE COLLISIONS
-    this.scope = scope; // TODO remove this if possible
+    this.scope = scope;  
     this.type = type;
+    this.weight = weight || 0; // sort or hard?
     this.check = function() { 
         var params = Array.prototype.slice.call(arguments);
         return relation.apply(this, params); }
-    /*
-        function() {
-        return relation.apply(this, scope)
-    } */
 };
 Constraint.prototype = Edge;
 
-var Assignment = function(valNode) {
+var Assignment = function(valNode, capacity) {
     this.id = _generateID(); // HANDLE COLLISIONS
     this.to = [valNode];
-    //console.log('pushing '+valNode.info+' with id '+valNode.id+' into new edge');
-    //console.log('to length now: '+this.to.length)
+    this.capacity = capacity || 1; // Flow network analysis
 }
 Assignment.prototype = Edge;
 
 var getConstraint = function(scope, rel, optional) {
     var type = (scope.length > 2 ? NARY : (scope.length < 2 ? UNARY : BINARY));
-    var from = scope[0];
+    var from = scope[0]; // is this ever used?
     var check = typeof optional === 'undefined' ? rel : rel.apply(null, optional); // we're looking for a closure
 
-    // I was originally using a [ tail | head ] structure for hyperedges, now moving toward [ { node set } ]
-    // var to = type === UNARY ? [from] : _.without(scope, from); // Do we really want cycles?
+    // to is set in hypergraph, head in directed domain subgraph
     var to = type === UNARY ? [from] : scope.slice();
     var cnst = new Constraint(type, check, scope);
     cnst.to = to;
@@ -131,6 +128,73 @@ var getConstraint = function(scope, rel, optional) {
 //#############################################
 /////// UTILITY FUNCTIONS ////////////////////
 //#############################################
+
+function computeMaximalMatching() {
+    // add source vertex
+    // add sink vertex
+    // for each variable passed in
+    // -add edge from source to variable
+    // -append edge to collection
+    // -for all edges in variable
+    // -append edge to collection
+    // -if domain val does not have edge->sink, add one and append to collection
+    
+    // call maxFlow(source, vertex); -- consider this
+    // if flow < numberOfVariablesPassIn
+    // return false;
+    // else if flow === number... // unnecessary
+    // IMPORTANT - add reverse edges FOR EACH EDGE IN MATCHING if not already added (why???)
+    // decomposeSubGraph(graph); // use Tarjan's algorithm
+    // for all edges from variablesPassedIn -> domain WITHOUT flow (not in matching)
+    // if edge not in matching
+    //      component = component containing edge.from
+    //      if(!(edge.to[0] in component))
+    //          PRUNE_EDGE_FROM_DOMAIN(); // !!
+
+    // remove/delete source vertex. (Do edges need to be explicitly deleted?)
+    // remove/delete edges from variable to sink, unless we want to persist these
+    // remove sink, unless we want to persist sink
+}
+
+function findPath(source, sink, path) {
+    // if source === sink
+    //      return path
+    // for edge in this.edges (I'll use findPath.call({edges: coll}, s,t,path)
+    //      residual = edge.capacity - self.flow[edge] // WHY USE SELF (GRAPH?)
+    //      if(residual > 0 && !(edge in path) // says (edge, residual) - does that matter?
+    //      create new array with path+edge
+    //      result = findPath.call(this, edge.to[0], sink, newpath);
+    //          if(result)
+    //              return result;
+}
+
+// TODO conditionally add edges to matching
+function maxFlow(source, sink) {
+    var graph = {edges: null, flow: null};
+    var path = findPath.call(source, sink, []);
+
+    while(path) {
+        // I think this will work as a min function
+        var minFlow = _.reduce(path, function(minFlow, step){
+            return step.res < minFlow ? step.res : minFlow;
+        }, Infinity);
+
+        // Merge path flow into 
+        _.each(path, function(step){
+            if(typeof graph.flow[step.edge] === 'undefined') { // TODO ensure flow initialized, delete
+                graph.flow[step.edge] += minFlow; // WHAT?
+                // same for redge - decide when to add that
+            }
+        });
+        path = findPath.call(source, sink, []);
+    }
+
+    // sum of flow for flow in edges from source, == maximal matching number (k)
+    return _.chain(source.edges)
+        .map(function(edge){return graph.flow[edge];})
+        .reduce(function(sum, f){return sum+f;})
+        .value();
+}
 
 function hasDomainValue(vrb, val) {
     for(var d in vrb.domain) {
@@ -289,7 +353,6 @@ var csp = function(variables, domain, constraints) {
         var params = cc.slice();
         params[0] = _.map(cc[0], function(varName){return self.vMap[varName]}); 
         var cnst = getConstraint.apply(self, params);
-        // TODO connect within graph if not already done?
         cMap[cnst.type].push(cnst);
     });
 
@@ -312,10 +375,10 @@ csp.prototype.solve = function() {
 
 function printSolution(sol) {
     for(var v in sol) {
-        console.log(v+': ');
-        for(var d in sol[v].domain) {
-            console.log(sol[v].domain[d].to[0].info+' ');
-        }
+        var str = v+': ';
+        for(var d in sol[v].domain) 
+            str+=sol[v].domain[d].to[0].info+' ';
+        console.log(str);
     }
 }
 
@@ -360,7 +423,7 @@ csp.prototype.getMostConstrainedVar = function() {
     for(var name in this.vMap) {
         var variable = this.vMap[name];
 
-        if(!variable instanceof Vertex)  // Debugging only, TODO delete
+        if(!variable instanceof Vertex || variable.domain.length < 2)  // Debugging only, TODO delete
             continue;
 
         if(!most || 
@@ -395,7 +458,7 @@ csp.prototype.backTrack = function(assignment) {
             inferences = forceSelection(considered, valNode);
             //debugger;
             var ret = this.infer(assignment, inferences);
-            if(ret !== FAILURE) { // FIXME this is no longer possible, verify return values
+            if(ret !== FAILURE) { 
                 var recur = this.backTrack(assignment);
                 if(recur !== FAILURE)
                     return recur;
@@ -427,14 +490,13 @@ csp.prototype.buildConstraintGraph = function() {
     console.log('Number of nary constraints: '+self.cMap[NARY].length);
 
     var vertices = [];
-    var edges = [];
+    // consider adding constraint/assignment arrays
 
     _.each(this.vMap, function(varNode){
         vertices.push(varNode); // add to graph collection
         _.each(self.domain, function(valNode){
             var ass = new Assignment(valNode);
             varNode.addAssignment(ass);
-        //    edges.push(ass); TODO decide if a single collection is ever worthwhile
         });
     });
 
@@ -445,14 +507,13 @@ csp.prototype.buildConstraintGraph = function() {
             case BINARY:
                 _.each(this.cMap[type], function(cc){
                     for(var i=0; i<cc.scope.length; i++) {
-                        if(!cc.scope[i]) continue; // I think this has been fixed, DELETE FIXME
+                        //if(!cc.scope[i]) continue; - FIXED TODO remove if verified
                         var vertex = self.vMap[cc.scope[i].info]; // get from the collection
                         cc.to.push(vertex);
                         var others = _.without(cc.scope, vertex.info);
                         _.each(others, function(affected){
                             vertex.addConstraint(cc);
                         });
-                        edges.push(cc); // add to graph-global collection
                     }
                 });
                 break;
@@ -463,8 +524,8 @@ csp.prototype.buildConstraintGraph = function() {
         }
     }
 
-    // NEED VERTICES, EDGES
-    var graph = new ConstraintGraph(vertices, edges);
+    // NEED VERTICES, --- CHANGED --- from: EDGES -- future: Constraints, Assignments
+    var graph = new ConstraintGraph(vertices);
 }
 
 
