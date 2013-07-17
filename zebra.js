@@ -24,33 +24,12 @@ var variables = [].concat(people, pets, colors, drinks, candies);
 /////// GRAPH DATA STRUCTURE /////////////////
 //#############################################
 
-// Attempting to convert to hypergraph
-var ConstraintGraph = function (vertices, directed) {
-    this.vertices = vertices || [];
-    this.directed = directed || false;
-};
-
-// separate out into WeightedGraph in library
-// TODO require an ID on vertices/edges as a means of key
-// TODO add constraints/variables as array, for sorting purposes?
-// (currently using map on csp object)
-ConstraintGraph.prototype = {
-    vertices: null,
-    directed: false
-}
-
-function _generateID () {
-      var S4 = function() {
-         return (((1+Math.random())*0x10000)|0).toString(16).substring(1);
-      };
-      return (S4()+S4()+"-"+S4()+"-"+S4()+"-"+S4()+"-"+S4()+S4()+S4());
-   }
-
+// TODO create domain node and regular vertex?
 var Vertex = function(info) {
     this.id = _generateID(); // HANDLE COLLISIONS
     this.info = info;
     this.domain = [];
-    this.edges = [];
+    //this.edges = [];
     this.constraints = [];
     this.connections = []; // TODO handle removal case maybe
 };
@@ -60,21 +39,21 @@ Vertex.prototype = {
     id: null,
     connections: null, // a set of unique ids of Edges
     info: null,
-    edges: null,
+    //edges: null,
     domain: null,
     constraints: null,
     addAssignment: function(assn) {
         if(!(assn.id in this.connections)) {
             this.connections.push(assn.id);
             this.domain.push(assn);
-            this.edges.push(assn);
+            //this.edges.push(assn); // TODO see if this is ever actually used, delete
         } else console.warn('Duplicate UUID found in addAssignment');
     },
     addConstraint: function(cnst) {
         if(!(cnst.id in this.connections)) {
             this.connections.push(cnst.id); // is this check redundant?
             this.constraints.push(cnst);
-            this.edges.push(cnst);
+            //this.edges.push(cnst);
         }
     }
 }
@@ -100,7 +79,8 @@ var Constraint = function(type, relation, scope, weight) {
     this.weight = weight || 0; // sort or hard?
     this.check = function() { 
         var params = Array.prototype.slice.call(arguments);
-        return relation.apply(this, params); }
+        return relation.apply(this, params);
+    }
 };
 Constraint.prototype = Edge;
 
@@ -108,8 +88,74 @@ var Assignment = function(valNode, capacity) {
     this.id = _generateID(); // HANDLE COLLISIONS
     this.to = [valNode];
     this.capacity = capacity || 1; // Flow network analysis
-}
+};
 Assignment.prototype = Edge;
+var Graph = {
+    vertices: null,
+    edges: null,
+    directed: false,
+    addEdges: function() {
+        var edges = Array.prototype.slice.call(arguments);
+        _.each(edges, function(edge){
+            if(!(edge in this.edges))
+                this.edges.push(edge);
+        });
+    }
+};
+
+var FlowProto = {
+    source: null,
+    sink: null,
+    flow: null,
+    initializeFlow: function (flush) {
+        this.flow = this.flow || {};
+        // weight represents flow in this graph
+        _.each(this.edges, function(edge) {
+            edge.weight = edge.weight && !flush ? edge.weight : 0;
+            this.flow[edge.id] = edge.weight;
+        });
+    }
+};
+FlowProto.prototype = Graph;
+
+// TODO require an ID on vertices/edges as a means of key
+// TODO add constraints/variables as array, for sorting purposes?
+// (currently using map on csp object)
+var ConstraintGraph = function (vertices, directed) {
+    this.vertices = vertices || [];
+    this.directed = directed || false;
+};
+ConstraintGraph.prototype = Graph;
+
+//var BipartiteFlowGraph = function(vertices, edges, domain) {
+var BipartiteFlowGraph = function(source, reversedSink, directed) {
+    var self = this;
+    this.vertices = [];
+    _.each(reversedSink.edges, function(edge){
+        var domainNode = edge.to[0];
+        // TODO add edges as I go?
+        domainNode.addAssignment(sink);
+        if(!self.directed) {
+            // delete sink->domain edges 
+        } else {} // add the reverse edge to colleciton otherwise
+        self.vertices.push(domainNode);
+    });
+    _.each(source.edges, function(edge){
+        var rangeNode = edge.to[0];
+        self.vertices.push(rangeNode);
+        self.edges.push(edge);
+        self.addEdges(rangeNode.domain);
+    });
+    this.edges = edges || [];
+    this.flow = vertices || {}; // named array
+
+    // add reduce
+    // add complement (reverse edges from domain)
+    // add flush
+}
+BipartiteFlowGraph.prototype = FlowProto;
+
+
 
 var getConstraint = function(scope, rel, optional) {
     var type = (scope.length > 2 ? NARY : (scope.length < 2 ? UNARY : BINARY));
@@ -129,7 +175,11 @@ var getConstraint = function(scope, rel, optional) {
 /////// UTILITY FUNCTIONS ////////////////////
 //#############################################
 
-function computeMaximalMatching() {
+function computeMaximalMatching(vars) {
+    var source = new Vertex(null);
+    var sink = new Vertex(null);
+    //var dom = _.chain(vars).map(function(v){return v.edges}).unique().value();
+    var flowGraph = new FlowGraph(vars);
     // add source vertex
     // add sink vertex
     // for each variable passed in
@@ -190,10 +240,17 @@ function maxFlow(source, sink) {
     }
 
     // sum of flow for flow in edges from source, == maximal matching number (k)
-    return _.chain(source.edges)
+    return _.chain(source.domain) // TODO change all domain to edge or assignment?
         .map(function(edge){return graph.flow[edge];})
         .reduce(function(sum, f){return sum+f;})
         .value();
+}
+
+function _generateID () {
+      var S4 = function() {
+         return (((1+Math.random())*0x10000)|0).toString(16).substring(1);
+      };
+      return (S4()+S4()+"-"+S4()+"-"+S4()+"-"+S4()+"-"+S4()+S4()+S4());
 }
 
 function hasDomainValue(vrb, val) {
@@ -298,13 +355,13 @@ function initializeQueue(constraints, Q) {
 
 
 function ac3(csp, inferences) {
+    console.log("AC3 running...");
     var Q = []; 
     initializeQueue(csp.cMap[UNARY], Q);
     initializeQueue(csp.cMap[BINARY], Q);
     //initializeQueue(csp.cMap[NARY], Q);
     
     while(Q.length > 0) {
-        console.log("AC3 running...");
         var arc = Q.shift();
         if(typeof arc === undefined) continue; // FIXME avoid pushing undefined arcs
         var v1 = arc[1][0], v2=arc[1][1];
@@ -336,6 +393,7 @@ function ac3(csp, inferences) {
   
 var csp = function(variables, domain, constraints) {
     var self = this;
+    this.stats = { depth: 0, max: 0, inf: 0, backtracks: 0, time: null};
     this.domain = _.map(domain, function(val){return new Vertex(val);});
     this.vMap = {}; // ONLY WORKS WITH STRINGS / UUIDS!!!
     this.numVars = variables.length;
@@ -366,9 +424,18 @@ var csp = function(variables, domain, constraints) {
 csp.prototype.solve = function() {
     var assignment = {}; 
     _.each(this.vMap, function(node){assignment[node.info]=node});
+
+    var start = new Date().getMilliseconds()
     var solution = this.backTrack(assignment);
+    this.stats.time = new Date().getMilliseconds() - start;
+
     if(solution !== FAILURE) {
-        console.log("Solved!\n");
+        console.log("\n\nSolved in "+
+                (this.stats.time < 1000 ? this.stats.time+" ms" : this.stats.time/1000+" seconds") + "!" +
+                "\ndepth: "+this.stats.depth +
+                "\nmax depth: "+this.stats.max +
+                "\ninferences: "+this.stats.inf +
+                "\nbacktracks: "+this.stats.backtracks+"\n\n\n");
         printSolution(solution);
     } else console.log("Failed to find a solution");
 }
@@ -410,6 +477,7 @@ csp.prototype.revise = function(cnst, inferences, params) {
 }
 
 csp.prototype.revert = function(inferences) {
+    this.stats.backtracks++;
     console.log('REVERTING');
     if(!inferences) return;
     while(inferences.length > 0) {
@@ -418,6 +486,7 @@ csp.prototype.revert = function(inferences) {
     }
 }
 
+// TODO use array, not map, and sort on the array during csp construction
 csp.prototype.getMostConstrainedVar = function() {
     var most; // most so far
     for(var name in this.vMap) {
@@ -432,7 +501,7 @@ csp.prototype.getMostConstrainedVar = function() {
     }
     if(most)
         console.log('most: '+most.info +' with '+most.constraints.length+' constraints');
-    return (most && most.constraints.length > 1) ? most : null;
+    return most || null;
 }
 
 // In my hypergraph formulation, inferences are simply edges in the
@@ -441,7 +510,10 @@ csp.prototype.getMostConstrainedVar = function() {
 // the set of edges removed in order to specify the assignemnt.
 // In this way, state reparation is very straightforward.
 csp.prototype.backTrack = function(assignment) {
-    //debugger;
+    this.stats.depth++;
+    if(this.stats.depth > this.stats.max)
+        this.stats.max = this.stats.depth;
+
     var considered = this.getMostConstrainedVar();
 
     if(considered === null) 
@@ -463,8 +535,9 @@ csp.prototype.backTrack = function(assignment) {
                 if(recur !== FAILURE)
                     return recur;
             } else {
-                console.log('about to fail in current iteration:\n');
-                //printSolution(assignment);
+                console.log('backtracking');
+                this.stats.backtracks++;
+                this.stats.depth = 0;
             }
         }
         // completely revert
@@ -475,6 +548,7 @@ csp.prototype.backTrack = function(assignment) {
 }
 
 csp.prototype.infer = function(assignment, inferences) {
+    this.stats.inf++;
     return ac3.call(null, this, inferences);
 }
 
