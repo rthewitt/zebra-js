@@ -337,7 +337,7 @@ var buildMatchingGraph = function(vars) {
                 restr += vars[vi].domain[di].to[0].info+"\n";
             }
         }
-        console.log(restr);
+        //console.log(restr);
     }
 
     //vars.sort(reverseDomainSort);
@@ -448,7 +448,7 @@ function forceSelection(vrb, val) {
 //  now expect second argument to be array with pivot in first place
 function queueAffectedNodes(Q, group) {
     if(group.length > 0) {
-        console.log('CSP was revised - ' + group[0].info + ' as pivot.');
+        //console.log('CSP was revised - ' + group[0].info + ' as pivot.');
         _.each(group[0].constraints, function(cnst){
             var members = _.difference(cnst.to, group);
             if(members.length > 0) {
@@ -505,7 +505,7 @@ function initializeQueue(constraints, Q) {
             vars = _.chain(vars)
                 .reject(isAssigned) // remove them from original
                 .map(function(vDomain){
-                    console.log("FILTERING: modified was: "+modified); // verify closure behavior
+                    //console.log("FILTERING: modified was: "+modified); // verify closure behavior
                     var filtered = _.difference(vDomain, assigned);
                     if(filtered.length !== vDomain.length)
                         modified = true; 
@@ -524,7 +524,7 @@ function initializeQueue(constraints, Q) {
 
         passed.push(flowGraph); // optionally hand back arguments for custom revision function
 
-        console.log('flow from constraint: '+maxFlow);
+        //console.log('flow from constraint: '+maxFlow);
         return maxFlow == vars.length; // perfect matching exists
     }
 
@@ -547,7 +547,7 @@ function initializeQueue(constraints, Q) {
                 var deadEnd = [];
                 if(comp && comp.indexOf(match.to[0].id) === -1) {
 
-                    console.log('SAFE TO REMOVE EDGE: ('+match.from.info+') -----> ('+match.to[0].info+')');
+                    //console.log('SAFE TO REMOVE EDGE: ('+match.from.info+') -----> ('+match.to[0].info+')');
                     for(var di=0; di<match.from.domain.length; di++) {
                         var domainNode = match.from.domain[di];
                         if(domainNode.id === match.id) 
@@ -569,7 +569,7 @@ function initializeQueue(constraints, Q) {
 
 
 function ac3(csp, inferences) {
-    console.log("AC3 running...");
+    //console.log("AC3 running...");
     var Q = []; 
     initializeQueue(csp.cMap[UNARY], Q);
     initializeQueue(csp.cMap[BINARY], Q);
@@ -596,7 +596,7 @@ function ac3(csp, inferences) {
                         reviseParams.push(inferences); // will pass them into custom global
                         var modified = arc[CNST].global.apply(null, reviseParams); // logic has a global override
                         if(modified) {
-                            console.log('Domains modified by cusom revision function.');
+                            //console.log('Domains modified by cusom revision function.');
                             for(var v in arc[1]) {
                                 if(arc[1][v].domain.length === 0)
                                     return FAILURE;
@@ -604,7 +604,7 @@ function ac3(csp, inferences) {
                             } 
                         } 
                     } else {
-                        console.log('FAILURE returned from nary constraint');
+                        //console.log('FAILURE returned from nary constraint');
                         return FAILURE; 
                     }
                 } else console.warn('Not yet implemented');
@@ -657,9 +657,9 @@ csp.prototype.solve = function() {
     var assignment = {}; 
     _.each(this.vMap, function(node){assignment[node.info]=node});
 
-    var start = new Date().getMilliseconds()
+    var start = Date.now();
     var solution = this.backTrack(assignment);
-    this.stats.time = new Date().getMilliseconds() - start;
+    this.stats.time = (Date.now() - start);
 
     if(solution !== FAILURE) {
         console.log("\n\nSolved in "+
@@ -673,12 +673,44 @@ csp.prototype.solve = function() {
 }
 
 function printSolution(sol) {
-    for(var v in sol) {
-        var str = v+': ';
-        for(var d in sol[v].domain)
-            str+=sol[v].domain[d].to[0].info+' ';
-        console.log(str);
+    var per=0,pet=1,col=2,drnk=3,cand=4;
+
+    var houses = new Array(5);
+    houses[per] = new Array(5);
+    houses[pet] = new Array(5);
+    houses[col] = new Array(5);
+    houses[drnk] = new Array(5);
+    houses[cand] = new Array(5);
+
+    for(var i=0; i<5; i++) {
+        for(var v in sol) {
+            for(var d in sol[v].domain) {
+                if(!sol[v].domain[d].to)
+                    continue;
+                else {
+                    var varName = sol[v].info;
+                    var houseNum = sol[v].domain[d].to[0].info-1;
+                    if(people.indexOf(varName) !== -1)
+                        houses[houseNum][per] = varName;
+                    else if(pets.indexOf(sol[v].info) !== -1)
+                        houses[houseNum][pet] = varName;
+                    else if(colors.indexOf(sol[v].info) !== -1)
+                        houses[houseNum][col] = varName;
+                    else if(drinks.indexOf(sol[v].info) !== -1)
+                        houses[houseNum][drnk] = varName;
+                    else if(candies.indexOf(sol[v].info) !== -1)
+                        houses[houseNum][cand] = varName;
+                }
+            }
+        }
     }
+
+    var hstr = ''
+    for(var i=0; i<5; i++)  {
+        var sp = i == 0 ? '\t' : '\t\t';
+        hstr += houses[per][i] + sp + houses[pet][i] + sp + houses[col][i] + sp +  houses[drnk][i] + sp + houses[cand][i] + '\n'; 
+    }
+    console.log(hstr);
 }
 
 // I believe this can easily be generalized to n-ary
@@ -711,7 +743,7 @@ csp.prototype.revise = function(cnst, inferences, params) {
 
 csp.prototype.revert = function(inferences) {
     this.stats.backtracks++;
-    console.log('REVERTING');
+    //console.log('REVERTING');
     if(!inferences) return;
     while(inferences.length > 0) {
         var inf = inferences.pop();
@@ -732,8 +764,6 @@ csp.prototype.getMostConstrainedVar = function() {
                 variable.constraints.length > most.constraints.length) 
             most = variable;
     }
-    if(most)
-        console.log('most: '+most.info +' with '+most.constraints.length+' constraints');
     return most || null;
 }
 
@@ -755,7 +785,7 @@ csp.prototype.backTrack = function(assignment) {
     var inferences;
     for(var vn in this.domain) {
         var valNode = this.domain[vn];
-        console.log('testing '+considered.info+' = '+valNode.info);
+        //console.log('testing '+considered.info+' = '+valNode.info);
         if(hasDomainValue(considered, valNode.info)) {
             // verify boundary conditions
             inferences = forceSelection(considered, valNode);
@@ -765,8 +795,6 @@ csp.prototype.backTrack = function(assignment) {
                 if(recur !== FAILURE)
                     return recur;
             } else {
-                //console.log('backtracking on the following assignment:');
-                //printSolution(assignment);
                 this.stats.backtracks++;
                 this.stats.depth = 0;
             }
