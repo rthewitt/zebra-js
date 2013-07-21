@@ -320,10 +320,6 @@ var getConstraint = function(scope, rel, optional) {
  * Prune edges by removing component-bridges
 **/
 
-function reverseDomainSort(a, b) {
-    return a.domain.length - b.domain.length;
-}
-
 // The r-edges from sink->domain COULD in theory be re-used
 var buildMatchingGraph = function(vars) {
     // There is a hack that says k-regular MUST have perfect matching
@@ -339,9 +335,6 @@ var buildMatchingGraph = function(vars) {
         }
         //console.log(restr);
     }
-
-    //vars.sort(reverseDomainSort);
-
 
     var source = new Vertex(null);
     var sink = new Vertex(null);
@@ -452,7 +445,7 @@ function queueAffectedNodes(Q, group) {
         _.each(group[0].constraints, function(cnst){
             var members = _.difference(cnst.to, group);
             if(members.length > 0) {
-                //console.log('PUSHING '+members.length+' NODES ONTO QUEUE');
+                console.log('PUSHING CONSTRAINT t='+parseInt(cnst.type)+' with '+members.length+' NODES ONTO QUEUE');
                 var slot = [cnst];
                 slot.push(members);
                 Q.push(slot);
@@ -705,10 +698,18 @@ function printSolution(sol) {
         }
     }
 
+    function pretty(slot) {
+        return slot + (k==4 ? '\n' : 
+            ((slot.length < 8) ? '\t\t' : '\t'));
+    }
+
     var hstr = ''
     for(var i=0; i<5; i++)  {
-        var sp = i == 0 ? '\t' : '\t\t';
-        hstr += houses[per][i] + sp + houses[pet][i] + sp + houses[col][i] + sp +  houses[drnk][i] + sp + houses[cand][i] + '\n'; 
+        for(var k=0; k<5; k++) {
+            debugger;
+            hstr += pretty(houses[k][i]);
+           // hstr += houses[per][i] + sp + houses[pet][i] + sp + houses[col][i] + sp +  houses[drnk][i] + sp + houses[cand][i] + '\n'; 
+        }
     }
     console.log(hstr);
 }
