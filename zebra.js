@@ -117,6 +117,11 @@ var Graph = function(v, e, d) {
         this.connections = [];
         for(var e=0; e<this.edges.length; e++)
             this.connections.push(this.edges[e].id);
+        for(var e in this.adj) {
+            this.adj[e] = _.filter(this.edges, function(edge) {
+                return edge.from.id === e || edge.to[0].id === e; // Ugly specific hack
+            });
+        }
     }
 
     // ensures index if constructor accepted arrays. Unique NOT enforced!
