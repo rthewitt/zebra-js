@@ -19,17 +19,16 @@ var domain = [1, 2, 3, 4, 5];
 var variables = [].concat(people, pets, colors, drinks, candies);
 
 
+var GLOBAL = {};
 
 //#############################################
 /////// GRAPH DATA STRUCTURE /////////////////
 //#############################################
 
-// TODO create domain node and regular vertex?
 var Vertex = function(info) {
     this.id = _generateID(); // HANDLE COLLISIONS
     this.info = info;
     this.domain = [];
-    //this.edges = [];
     this.constraints = [];
     this.connections = []; // TODO handle removal case maybe
 };
@@ -39,7 +38,6 @@ Vertex.prototype = {
     id: null,
     connections: null, // a set of unique ids of Edges
     info: null,
-    //edges: null,
     domain: null,
     constraints: null,
     addAssignment: function(assn) {
@@ -140,8 +138,6 @@ var ConstraintGraph = function (vertices, directed) {
 ConstraintGraph.prototype = new tmpGraph();
 ConstraintGraph.prototype.constructor = ConstraintGraph;
 
-// TODO add domain in parallel to vertices, alias vertices->range?
-// TODO add complement (reverse edges from domain)
 var BipartiteFlowGraph = function(source, reversedSink) {
     //console.log('reverse links: '+reversedSink.domain.length);
 
@@ -221,6 +217,10 @@ var BipartiteFlowGraph = function(source, reversedSink) {
         this.refreshIndex();
     };
 
+    this.getStrongComponents =  function() {
+        return getStrongComponents.call(this);
+    }
+
     this.maxFlow = function(source, sink) {
         var self = this;
         this.matching = [];
@@ -242,43 +242,17 @@ var BipartiteFlowGraph = function(source, reversedSink) {
             path = this.findPath(source, sink, []);
         }
 
-        /*
-        var maximal = _.reduce(this.adj[source.id], function(flow, sinkLink){
-            var f = self.flow[sinkLink.id];
-            return f > 0 ? f+flow: flow;
-        }, 0);
-        console.log('sink flow: '+maximal);
-        */
-
-
         return _.chain(this.adj[source.id])
             .map(function(link){ return self.adj[link.to[0].id]; })
             .flatten(true) // shallow
             .filter(function(link){ return link.to[0].info !== self.sink.info && self.flow[link.id] > 0; })
             .map(function(matchingEdge){
-                //console.log('INFO: '+matchingEdge.from.info + ' and ' + matchingEdge.to[0].info);
                 self.matching.push(matchingEdge);
                 return self.flow[matchingEdge.id]; // side-effect!!!
             })
             .reduce(function(sum, f){ 
                 return f > 0 ? f+sum : sum; }, 0)
             .value();
-
-
-
-
-
-        // sum of flow for flow in edges from source, == maximal matching number (k)
-        /*
-        return _.chain(this.adj[source.id])
-            .filter(function(edge){ return self.flow[edge.id] > 0 })
-            .map(function(edge){ 
-                self.matching.push(edge); // side-effect!!!
-                return self.flow[edge.id];
-            })
-            .reduce(function(sum, f){return sum+f;})
-            .value();
-            */
     };
 
     this.findPath = function (src, dst, path) {
@@ -351,7 +325,7 @@ function reverseDomainSort(a, b) {
 }
 
 // The r-edges from sink->domain COULD in theory be re-used
-function computeMaximalMatching(vars, revisionArray) {
+var buildMatchingGraph = function(vars) {
     // There is a hack that says k-regular MUST have perfect matching
     // If I take advantage of that, can I still prune?
 
@@ -380,39 +354,16 @@ function computeMaximalMatching(vars, revisionArray) {
             if(!(domNode.id in sunkenDomain)) {
                 var redge = new Assignment(sink, domNode);
                 sink.addAssignment(redge);
-                sunkenDomain[domNode.id] = true; // TODO maybe add edges to a collection here for future pruning!
+                sunkenDomain[domNode.id] = true;
             }
         });
     });
-    var flowGraph = new BipartiteFlowGraph(source, sink); // TODO make undirected again? or handle later?
-
-    var maxFlow = flowGraph.maxFlow(source, sink); 
-
-    if(maxFlow < 5) {
-    console.log('flow: ' + maxFlow + ' involving '+vars[0].info);
-    console.log('edges found: '+flowGraph.matching.length);
-    pv();
-
-    var eee = flowGraph.edges;
-    console.log('had '+eee.length+' edges');
-    for(var i=0; i<eee.length; i++)
-        console.log('('+eee[i].from.info+') -----> ('+eee[i].to[0].info+')');
-    }
-
-    flowGraph.demote(); 
-
-    if(maxFlow < 5) {
-    eee = flowGraph.edges; // changes ref
-    console.log('now has '+eee.length+' edges');
-    for(var i=0; i<eee.length; i++)
-        console.log('('+eee[i].from.info+') -----> ('+eee[i].to[0].info+')');
-    }
-
-    decomposeFlowGraph(flowGraph);
-    return maxFlow;
+    return  new BipartiteFlowGraph(source, sink);
 }
 
-function decomposeFlowGraph(graph) { // FIXME
+// This function will be called in the context of the Bipartite Graph
+function getStrongComponents() {
+    var graph = this;
 
     var uglyHackMap = {}; // TODO remove this collection
 
@@ -422,8 +373,8 @@ function decomposeFlowGraph(graph) { // FIXME
 
     var components = [];
 
-    for(var idx in graph.vertices) {
-        var v = graph.vertices[idx];
+    for(var idx in this.vertices) {
+        var v = this.vertices[idx];
         if(!(v.id in dpfIndex))
             strongConnect(v)
     }
@@ -436,7 +387,6 @@ function decomposeFlowGraph(graph) { // FIXME
         if(!uglyHackMap[v.id]) uglyHackMap[v.id] = v; // TODO move into graph
         dpfStack.push(v.id); // TODO I may be able to just push the vertex directly
 
-        // CHANGED TO USE ADJACENCY LIST, VERIFY
         _.each(graph.adj[v.id], function(edge) {
             var w = edge.to[0]; // successor node
             if(!(w.id in dpfIndex)) {
@@ -456,35 +406,7 @@ function decomposeFlowGraph(graph) { // FIXME
             components.push(scc);
         }
     }
-    
-    // TODO
-    //      if(!(edge.to[0] in component))
-    //          PRUNE_EDGE_FROM_DOMAIN(); // !!
-    console.log('components found: '+components.length );
-    var cstr = '';
-    _.each(graph.matching, function(match){
-        var comp;
-        for(var x in components)
-            if(components[x].indexOf(match.from.id) != -1)
-                comp = components[x];
-        if(comp && !(comp.indexOf(match.to[0].id) != -1)) {
-            debugger;
-            console.log('SAFE TO REMOVE EDGE: ('+match.from.info+') -----> ('+match.to[0].info+')');
-                }
-        else if(comp) 
-            ;//console.log('GOOD EDGE: ('+match.from.info+') -----> ('+match.to[0].info+')');
-        else
-            debugger;
-    });
-    /*
-    for(var x in components) {
-        var st = '';
-        for(var cc in components[x])
-            st += 'id' + components[x][cc]+'\n';
-        cstr+=st+'\n';
-    }
-    console.log(cstr+'\n\n\n');
-    */
+
     return components;
 }
 
@@ -522,18 +444,21 @@ function forceSelection(vrb, val) {
     return inf;
 }
 
-function queueAffectedNodes(Q, vNode, spent) {
-    console.log('CSP was revised - ' + vNode.info + ' as pivot.');
-    if(spent)
-    _.each(vNode.constraints, function(cnst){
-        var members = _.without(cnst.to, vNode, spent);
-        if(members.length > 0) {
-            //console.log('PUSHING '+members.length+' NODES ONTO QUEUE');
-            var slot = [cnst];
-            slot.push(members);
-            Q.push(slot);
-        }
-    });
+//function queueAffectedNodes(Q, vNode, spent) {
+//  now expect second argument to be array with pivot in first place
+function queueAffectedNodes(Q, group) {
+    if(group.length > 0) {
+        console.log('CSP was revised - ' + group[0].info + ' as pivot.');
+        _.each(group[0].constraints, function(cnst){
+            var members = _.difference(cnst.to, group);
+            if(members.length > 0) {
+                //console.log('PUSHING '+members.length+' NODES ONTO QUEUE');
+                var slot = [cnst];
+                slot.push(members);
+                Q.push(slot);
+            }
+        });
+    }
 }
 
 // returns in form: [constraint, [args...]]
@@ -592,8 +517,50 @@ function initializeQueue(constraints, Q) {
         return modified;
     } 
 
-    var ALL_DIFF = function(vars) {
-        return computeMaximalMatching(vars) == vars.length; // perfect matching exists
+    var ALL_DIFF = function(vars, passed) {
+        var flowGraph = buildMatchingGraph(vars);
+        var maxFlow = flowGraph.maxFlow(flowGraph.source, flowGraph.sink);  // TODO add wrapper function to graph
+        flowGraph.demote(); // rename
+
+        passed.push(flowGraph); // optionally hand back arguments for custom revision function
+
+        console.log('flow from constraint: '+maxFlow);
+        return maxFlow == vars.length; // perfect matching exists
+    }
+
+
+    GLOBAL['ALLDIFF_REVISE'] = function(flowGraph, inferences) {
+        if(!flowGraph || !inferences) return [];
+
+        var components = flowGraph.getStrongComponents(); // rename
+        
+        var notInMatching = _.difference(this.edges, this.matching);
+
+        var inf = _.chain(notInMatching)
+            .map(function(match) {
+
+                var comp;
+                for(var x in components)
+                    if(components[x].indexOf(match.from.id) != -1)
+                        comp = components[x];
+
+                var deadEnd = [];
+                if(comp && comp.indexOf(match.to[0].id) === -1) {
+
+                    console.log('SAFE TO REMOVE EDGE: ('+match.from.info+') -----> ('+match.to[0].info+')');
+                    for(var di=0; di<match.from.domain.length; di++) {
+                        var domainNode = match.from.domain[di];
+                        if(domainNode.id === match.id) 
+                            deadEnd.push(tt);
+                    }
+
+                    return { variable: match.from, edges: deadEnd };
+                } else return undefined;
+            }).compact().value();
+
+        inferences.push.apply(inferences, inf);
+
+        return inferences.length > 0; // modified?
     }
 
 //#############################################
@@ -611,23 +578,36 @@ function ac3(csp, inferences) {
     while(Q.length > 0) {
         var arc = Q.shift();
         if(typeof arc === undefined) continue; // FIXME avoid pushing undefined arcs
-        var v1 = arc[1][0], v2=arc[1][1];
 
         switch(parseInt(arc[CNST].type)){
             case UNARY:
             case BINARY:
-                if(csp.revise(arc[0], inferences, arc[1])) {
-                    if(v1.domain.length === 0) 
+                if(csp.revise(arc[CNST], inferences, arc[1])) {
+                    if(arc[1][0].domain.length === 0) 
                         return FAILURE; 
-                    queueAffectedNodes(Q, v1, v2);
+                    queueAffectedNodes(Q, arc[1]);
                 }
                 break;
             case NARY:
                 if(arc[CNST].global) {
-                    var result = arc[CNST].check(arc[1]); // TODO try extra array
-                    // arc[CNST].global.call(null); // logic has a global override
-                    if(!result) return FAILURE;
-                }
+                    var reviseParams = [];
+                    var result = arc[CNST].check(arc[1], reviseParams);
+                    if(result) {
+                        reviseParams.push(inferences); // will pass them into custom global
+                        var modified = arc[CNST].global.apply(null, reviseParams); // logic has a global override
+                        if(modified) {
+                            console.log('Domains modified by cusom revision function.');
+                            for(var v in arc[1]) {
+                                if(arc[1][v].domain.length === 0)
+                                    return FAILURE;
+                                else queueAffectedNodes(Q, (_.without(arc[1], v).unshift(v)));
+                            } 
+                        } 
+                    } else {
+                        console.log('FAILURE returned from nary constraint');
+                        return FAILURE; 
+                    }
+                } else console.warn('Not yet implemented');
                 break;
             default:
                 break;
@@ -713,16 +693,15 @@ csp.prototype.revise = function(cnst, inferences, params) {
         var found=false;
         var pivotVal = assnEdge.to[0];
         var targetVar = parseInt(cnst.type) === UNARY ? pivotVar : params[1]; // UGLY unary case
-        for(var t=0; t<targetVar.domain.length; t++) { // TODO VERY IMPORTANT, HOW DID 'weight' GET ADDED TO THE ARRAY??????!!!!!!
+        for(var t=0; t<targetVar.domain.length; t++) { 
             var targetVal = targetVar.domain[t].to[0]; // domain node
-            if(cnst.check(pivotVal, targetVal)) { // is ordering preserved?
+            if(cnst.check(pivotVal, targetVal)) { 
                 found = true;
                 break;
             }
         }
         if(!found) {
             pivotVar.domain = _.without(pivotVar.domain, assnEdge);
-            // TODO MAKE THIS MORE COMPACT
             inferences.push({variable: pivotVar, edges: [assnEdge]});
             modified = true;
         }
@@ -850,16 +829,9 @@ csp.prototype.buildConstraintGraph = function() {
         }
     }
 
-    // NEED VERTICES, --- CHANGED --- from: EDGES -- future: Constraints, Assignments
     var graph = new ConstraintGraph(vertices);
 }
 
-
-// test global revision
-var globalRevision = function(checkRet) {
-    if(typeof checkRet !== 'undefined' && !checkRet)
-        return FAILURE;
-}
 
 // If function is passed, it will be a global revision function.
 // The revision argument will receive the extra parameter to check
@@ -878,11 +850,11 @@ var constraints = [
     [ ["kit-kat", "horse"], NEXT ],
     [ ["coffee", "green"], SAME ],
     [ ["milk"], VALUE, [3]],
-    [ people, ALL_DIFF, globalRevision ],
-    [ pets, ALL_DIFF, globalRevision ],
-    [ colors, ALL_DIFF, globalRevision ],
-    [ drinks, ALL_DIFF, globalRevision ],
-    [ candies, ALL_DIFF, globalRevision ]
+    [ people, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
+    [ pets, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
+    [ colors, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
+    [ drinks, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
+    [ candies, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ]
 ];
 
 var problem = new csp(variables, domain, constraints);
