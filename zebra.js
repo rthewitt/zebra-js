@@ -513,6 +513,7 @@ function initializeQueue(constraints, Q) {
         function isAssigned(v) {
             return v.domain.length === 1;
         }
+        
 
         var assigned = _.filter(vars, isAssigned);
         if(assigned.length === vars.length) {
@@ -558,6 +559,21 @@ function initializeQueue(constraints, Q) {
     }
 
     var ALL_DIFF = function(vars, passed) {
+
+        // ALL_DIFF_STUPID inclusion to avoid checking in the straightforward cases
+        function isAssigned(v) {
+            return v.domain.length === 1;
+        }
+        
+
+        var assigned = _.filter(vars, isAssigned);
+        if(assigned.length === vars.length) {
+            var allDiff = _.chain(vars).map(function(v){ return v.domain[0].to[0].info }).unique().value().length === vars.length;
+            return allDiff;
+        } else {
+
+        // Not all assigned: original function continues below
+
         var flowGraph = buildMatchingGraph(vars);
         var maxFlow = flowGraph.maxFlow(flowGraph.source, flowGraph.sink);  // TODO add wrapper function to graph
         //var start = Date.now();
@@ -569,6 +585,8 @@ function initializeQueue(constraints, Q) {
         //INSTRUMENTATION += (end-start);
         //INSTCOUNT++;
         return maxFlow == vars.length; // perfect matching exists
+
+        }
     }
 
 
@@ -940,11 +958,18 @@ var constraints = [
     [ ["kit-kat", "horse"], NEXT ],
     [ ["coffee", "green"], SAME ],
     [ ["milk"], VALUE, [3]],
+    [ people, ALL_DIFF ],
+    [ pets, ALL_DIFF ],
+    [ colors, ALL_DIFF ],
+    [ drinks, ALL_DIFF ],
+    [ candies, ALL_DIFF ]
+    /*
     [ people, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ pets, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ colors, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ drinks, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ candies, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ]
+    */
 ];
 
 var problem = new csp(variables, domain, constraints);
