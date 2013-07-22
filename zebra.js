@@ -95,27 +95,44 @@ var Graph = function(v, e, d) {
     this.adj = {};
     this.connections = [];
     this.directed = d || false;
-    this.addVertex = function(v) {
-        if(!(v.id in this.vIndex)) {
-            this.vertices.push(v);
-            this.vIndex.push(v.id);
+
+    function addAdjacent(e) {
+        if(e.from) {
+            if(e.from.id in this.adj)
+                this.adj[e.from.id].push(e);
+            else this.adj[e.from.id] = [ e ];
         }
     }
+
+
+
+    this.addVertex = function(v) {
+        if(this.vIndex.indexOf(v.id) === -1) {
+            this.vertices.push(v);
+            this.vIndex.push(v.id);
+        } 
+       // else console.log('addVertex: blocked vertex');
+    }
     this.addEdge = function(e) {
-        if(!(e.id in this.connections)) {
+        if(this.connections.indexOf(e.id) === -1) {
             this.connections.push(e.id);
             this.edges.push(e);
-            if(e.from) {
-                if(e.from.id in this.adj)
-                    this.adj[e.from.id].push(e);
-                else this.adj[e.from.id] = [ e ];
-            }
+            addAdjacent.call(this, e);
+        } else {
+        //    console.log('addEdge: edge blocked with info ' + e.from.info);
+            addAdjacent.call(this, e);
         }
     };
     this.refreshIndex = function() {
         this.connections = [];
         for(var e=0; e<this.edges.length; e++)
             this.connections.push(this.edges[e].id);
+
+        // Added for this branch, may mess up the algorithm
+        this.adj = {};
+        this.vIndex = [];
+        // End additions
+        
         for(var e in this.adj) {
             this.adj[e] = _.filter(this.edges, function(edge) {
                 return edge.from.id === e || edge.to[0].id === e; // Ugly specific hack
@@ -186,6 +203,7 @@ var BipartiteFlowGraph = function(source, reversedSink) {
             }
             self.clean.push(redge);
 
+         //   console.log('adding vertex '+destNode.info+' with id: '+destNode.id);
             self.addVertex(destNode);
 
             if(follow) integrateNode(destNode, false);
@@ -197,8 +215,60 @@ var BipartiteFlowGraph = function(source, reversedSink) {
     initializeFlow.call(this, true);
 
     this.flush = function() { 
-        return initializeFlow(true);
+        return initializeFlow.call(this, true);
     };
+
+    // Will be total at first, then gradually only what is necessary
+    this.rebuild = function(vars) { 
+        this.matching = null; // will trigger richer clean in demote
+        this.vertices = [];
+        this.clean = []; // ugh
+        this.demote(); // FIXM_E
+        this.flush();
+        this.refreshIndex();
+
+        
+
+        var graph = this;
+        var sunkenDomain = {};
+        // make this come from sink, not passed in vars!!!
+        _.each(vars, function(rangeNode) {
+            // THIS MAY STILL BE NEEDED!
+            //graph.source.addAssignment(new Assignment(source, rangeNode));
+            _.each(rangeNode.domain, function(domAssn) {
+                //console.log('establishing domain link');
+                var domNode = domAssn.to[0];
+                if(!(domNode.id in sunkenDomain)) {
+                    var redge = new Assignment(graph.sink, domNode);
+                    graph.sink.addAssignment(redge);
+                    sunkenDomain[domNode.id] = true;
+                } //else console.log('found in sunken domain already');
+            });
+        });
+
+        integrateNode.call(this, this.source, true);
+        integrateNode.call(this, this.sink); 
+        initializeFlow.call(this, true);
+
+        /*
+        if(this.source) console.log('has a source');
+        if(this.sink) console.log('has a sink');
+        console.log('source has: '+this.source.domain.length);
+        console.log('sink has: '+this.sink.domain.length);
+
+        console.log('Now flowGraph has '+this.edges.length+' edges');
+        console.log('Now flowGraph has '+this.vertices.length+' vertices');
+
+        /*
+        _.each(this.edges, function(e){
+            console.log(e.to[0].info);
+        });
+        _.each(this.vertices, function(v){
+            console.log(v.info);
+        });
+        */
+        
+    }
 
     // Gracefully degrade to bipartite with matching bidirectionality
     this.demote = function() {
@@ -301,6 +371,10 @@ var getConstraint = function(scope, rel, optional) {
     var cnst = new Constraint(type, check, scope); // FIXME
     cnst.to = to;
     cnst.from = from;
+
+    // IMPORTANT: Changing the workings of Constraint to contain a shared flowgraph
+    cnst.flowGraph = buildMatchingGraph(cnst.to);
+    
 
     if(opt === 'function') cnst.global = optional;
 
@@ -562,9 +636,14 @@ function initializeQueue(constraints, Q) {
     }
 
     var ALL_DIFF = function(vars, passed) {
+
+        passed.push(null); // NO LONGER NECESSARY IN THIS CODE-BRANCH, AS NO PARAMS ARE REQUIRED
+
         /*
          * I will now use the closure nature of this method to share the domain graph between iterations
          */
+        INSTRUMENTATION += 1; // lol
+        INSTCOUNT++;
 
         // ALL_DIFF_STUPID inclusion to avoid checking in the straightforward cases
         function isAssigned(v) {
@@ -581,16 +660,14 @@ function initializeQueue(constraints, Q) {
         // Not all assigned: original function continues below
 
         //var flowGraph = buildMatchingGraph(vars);
+        this.flowGraph.rebuild(this.to);
 
-        var maxFlow = this.flowGraph.maxFlow(flowGraph.source, flowGraph.sink);  // TODO add wrapper function to graph
         //var start = Date.now();
+        var maxFlow = this.flowGraph.maxFlow(this.flowGraph.source, this.flowGraph.sink);  // TODO add wrapper function to graph
         this.flowGraph.demote(); // safely cleans and prepares the graph state
         //var end = Date.now();
 
-        //passed.push(this.flowGraph); // NO LONGER NECESSARY IN THIS CODE-BRANCH, AS NO PARAMS ARE REQUIRED
 
-        //INSTRUMENTATION += (end-start);
-        //INSTCOUNT++;
         return maxFlow == vars.length; // perfect matching exists
 
         }
@@ -599,7 +676,8 @@ function initializeQueue(constraints, Q) {
 
     GLOBAL['ALLDIFF_REVISE'] = function(NOT_USED, inferences) {
         if(!this.flowGraph || !inferences) {
-            console.eror('MAJOR PROBLEM, GLOBAL CLOSURE NOT WORKING');
+            debugger;
+            console.error('MAJOR PROBLEM, GLOBAL CLOSURE NOT WORKING');
             return [];
         }
 
@@ -798,7 +876,6 @@ function printSolution(sol) {
     var hstr = ''
     for(var i=0; i<5; i++)  {
         for(var k=0; k<5; k++) {
-            debugger;
             hstr += pretty(houses[k][i]);
            // hstr += houses[per][i] + sp + houses[pet][i] + sp + houses[col][i] + sp +  houses[drnk][i] + sp + houses[cand][i] + '\n'; 
         }
@@ -968,18 +1045,18 @@ var constraints = [
     [ ["kit-kat", "horse"], NEXT ],
     [ ["coffee", "green"], SAME ],
     [ ["milk"], VALUE, [3]],
+    /*
     [ people, ALL_DIFF ],
     [ pets, ALL_DIFF ],
     [ colors, ALL_DIFF ],
     [ drinks, ALL_DIFF ],
     [ candies, ALL_DIFF ]
-    /*
+    */
     [ people, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ pets, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ colors, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ drinks, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ candies, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ]
-    */
 ];
 
 var problem = new csp(variables, domain, constraints);
