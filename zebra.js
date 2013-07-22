@@ -18,6 +18,9 @@ var candies = ["kit-kat", "smarties", "snickers", "hershey", "milky-way"];
 var domain = [1, 2, 3, 4, 5];
 var variables = [].concat(people, pets, colors, drinks, candies);
 
+var INSTRUMENTATION = 0; // timing to find inefficiency
+var INSTCOUNT = 0;
+
 
 var GLOBAL = {};
 
@@ -65,11 +68,9 @@ var Edge = function(from, to, capacity) {
 };
 
 var UNARY=1, BINARY=2, NARY=3;
-// if graph ever becomes dynamic, we'll need to manage scope or rely on traversal
-// to determine variable dependence.  (Preferred)
 var Constraint = function(type, relation, scope) {
+    // TODO fix inheritence so that we can set edge here!
     this.id = _generateID(); // HANDLE COLLISIONS
-    this.scope = scope;  
     this.type = type;
     this.check = function() { 
         var params = Array.prototype.slice.call(arguments);
@@ -294,11 +295,10 @@ var getConstraint = function(scope, rel, optional) {
     else
         check = optional instanceof Array ? rel.apply(null, optional) : rel.call(null, optional);
 
-    //var check = typeof optional === 'undefined' ? rel : rel.apply(null, optional); // we're looking for a closure
 
-    // to is set in hypergraph, head in directed domain subgraph
+    // TODO fix inheritence, this should not happen in a builder function
     var to = type === UNARY ? [from] : scope.slice();
-    var cnst = new Constraint(type, check, scope);
+    var cnst = new Constraint(type, check, scope); // FIXME
     cnst.to = to;
     cnst.from = from;
 
@@ -324,7 +324,6 @@ var getConstraint = function(scope, rel, optional) {
 var buildMatchingGraph = function(vars) {
     // There is a hack that says k-regular MUST have perfect matching
     // If I take advantage of that, can I still prune?
-
     function pv() {
         var restr="\n";
         for(var vi=0; vi<vars.length; vi++ ) {
@@ -351,6 +350,8 @@ var buildMatchingGraph = function(vars) {
             }
         });
     });
+
+
     return  new BipartiteFlowGraph(source, sink);
 }
 
@@ -437,30 +438,50 @@ function forceSelection(vrb, val) {
     return inf;
 }
 
-//function queueAffectedNodes(Q, vNode, spent) {
-//  now expect second argument to be array with pivot in first place
-function queueAffectedNodes(Q, group) {
-    if(group.length > 0) {
-        //console.log('CSP was revised - ' + group[0].info + ' as pivot.');
-        _.each(group[0].constraints, function(cnst){
-            var members = _.difference(cnst.to, group);
-            if(members.length > 0) {
-                console.log('PUSHING CONSTRAINT t='+parseInt(cnst.type)+' with '+members.length+' NODES ONTO QUEUE');
-                var slot = [cnst];
-                slot.push(members);
-                Q.push(slot);
-            }
+    function containsConstraint(Q, cnst) {
+        var whut =_.some(Q, function(cc){ 
+            var retter =  cc[0].id === cnst.id
+        //if(retter) console.log('found: '+cc[0].id+ ' and '+cnst.id);
+        return retter;
         });
+        if(!whut) console.log('returning '+whut);
+        return whut;
     }
+
+
+function sortQ(a, b) {
+    if(!a || !b) return 0;
+    return a.type - b.type;
 }
 
-// returns in form: [constraint, [args...]]
+/* The function below has changed so that now we are just appending constraints, NOT arcs
+ * The logic was ruined by earlier changes, so that members was always an empty set.
+ * LOGIC:
+ * We want to push all constraints for each node affected by the previous changes.
+ * In the binary case, we have modified only one domain, that of the first in to. (pivot?)
+ * In the nary case, we may have modified ANY of the constraints, and so we need to push all related for each
+ * There is no notion of a pivot in the NARY case
+ */
+function queueAffectedNodes(Q, affected, justChecked) {
+    if(affected.length > 0) {
+        // for each in group (I will remove - previously - in the binary case as pivot is not modified)
+        _.each(affected, function(vertex){
+            var unnecessary = Q.concat(justChecked);
+            var goingToPush = _.difference(vertex.constraints, unnecessary);
+            if(goingToPush.length > 0) 
+                Q.push.apply(goingToPush);
+        });
+    }
+    Q.sort(sortQ);
+}
+
+// Q will always be empty before performing the three additions.  
 function initializeQueue(constraints, Q) {
     if(Q instanceof Array)  {
-        var arcs = _.map(constraints, function(cnst){
-            return [cnst, _.unique(cnst.to.slice())] // PROBLEM, EXPANDING ABOVE
-        });
-        Q.push.apply(Q, arcs);
+        var arcs = _.difference(constraints, Q);
+        if(arcs.length > 0) {
+            Q.push.apply(Q, constraints);
+        }
     } else console.error('Bad Q');
 }
 
@@ -488,36 +509,65 @@ function initializeQueue(constraints, Q) {
         return Math.abs(b.info-a.info) === 1;
     }
 
-    // vars is an array of domain arrays!! 
-    var OLD_ALL_DIFF = function(vars) {
-        var modified = false;
-
-        // separate variables already assigned
-        var assigned = getAssigned(vars);
-        while(assigned.length !== 0) {
-            vars = _.chain(vars)
-                .reject(isAssigned) // remove them from original
-                .map(function(vDomain){
-                    //console.log("FILTERING: modified was: "+modified); // verify closure behavior
-                    var filtered = _.difference(vDomain, assigned);
-                    if(filtered.length !== vDomain.length)
-                        modified = true; 
-                    return filtered;
-                }).value();
-
-            assigned = getAssigned(vars); // check again for singletons
+    var ALL_DIFF_STUPID = function(vars, passed) {
+        function isAssigned(v) {
+            return v.domain.length === 1;
         }
-        return modified;
-    } 
+
+        var assigned = _.filter(vars, isAssigned);
+        if(assigned.length === vars.length) {
+            var allDiff = _.chain(vars).map(function(v){ return v.domain[0].to[0].info }).unique().value().length === vars.length;
+            return allDiff;
+        } else return true;
+    }
+
+    var ALL_DIFF_SIMPLE = function(vars, passed) {
+        function isAssigned(v) {
+            return v.domain.length === 1;
+        }
+        //var start = Date.now();
+
+        var assigned = _.filter(vars, isAssigned);
+        if(assigned.length === vars.length) {
+            var allDiff = _.chain(vars).map(function(v){ return v.domain[0].to[0].info }).unique().value().length === vars.length;
+                    //var end = Date.now();
+                    //INSTRUMENTATION += (end-start);
+                    //INSTCOUNT++;
+            return allDiff;
+        } else { // not all assigned
+            var unassigned = _.reject(vars, isAssigned); 
+            var domainColl = _.chain(unassigned).map(function(v){ return v.domain }).value();
+            var domains = [];
+            _.each(domainColl, function(edges){
+                var flatVals = _.map(edges, function(domEdge){ return domEdge.to[0].info; });
+                domains.push(flatVals);
+            });
+            // at least one
+            var num = domains[0].length;
+            var allSame = _.every(domains, function(dom){ return dom.length === num; });
+            if(allSame) {
+                    //var end = Date.now();
+                    //INSTRUMENTATION += (end-start);
+                    //INSTCOUNT++;
+                if(num < unassigned.length) return false; // will result in empty domain
+                else return true; // possible
+            } else { // Hook for revision override here
+                return true; 
+            }
+        }
+    }
 
     var ALL_DIFF = function(vars, passed) {
         var flowGraph = buildMatchingGraph(vars);
         var maxFlow = flowGraph.maxFlow(flowGraph.source, flowGraph.sink);  // TODO add wrapper function to graph
-        flowGraph.demote(); // rename
+        //var start = Date.now();
+        flowGraph.demote(); // safely cleans and prepares the graph state
+        //var end = Date.now();
 
         passed.push(flowGraph); // optionally hand back arguments for custom revision function
 
-        //console.log('flow from constraint: '+maxFlow);
+        //INSTRUMENTATION += (end-start);
+        //INSTCOUNT++;
         return maxFlow == vars.length; // perfect matching exists
     }
 
@@ -525,7 +575,11 @@ function initializeQueue(constraints, Q) {
     GLOBAL['ALLDIFF_REVISE'] = function(flowGraph, inferences) {
         if(!flowGraph || !inferences) return [];
 
+        var start = Date.now();
         var components = flowGraph.getStrongComponents(); // rename
+        var end = Date.now();
+        INSTRUMENTATION += (end-start);
+        INSTCOUNT++;
         
         var notInMatching = _.difference(this.edges, this.matching);
 
@@ -562,45 +616,51 @@ function initializeQueue(constraints, Q) {
 
 
 function ac3(csp, inferences) {
-    //console.log("AC3 running...");
     var Q = []; 
     initializeQueue(csp.cMap[UNARY], Q);
     initializeQueue(csp.cMap[BINARY], Q);
     initializeQueue(csp.cMap[NARY], Q);
     
     while(Q.length > 0) {
-        var arc = Q.shift();
-        if(typeof arc === undefined) continue; // FIXME avoid pushing undefined arcs
+        var cnst = Q.shift();
+        if(typeof cnst === undefined) { // FIXME avoid pushing undefined arcs
+            console.error('UNDEFINED ARC IN QUEUE!!!!');
+            continue; 
+        }
 
-        switch(parseInt(arc[CNST].type)){
+        switch(parseInt(cnst.type)){
             case UNARY:
             case BINARY:
-                if(csp.revise(arc[CNST], inferences, arc[1])) {
-                    if(arc[1][0].domain.length === 0) 
+                if(csp.revise(cnst, inferences, cnst.to)) {
+                    if(cnst.to[0].domain.length === 0)  
                         return FAILURE; 
-                    queueAffectedNodes(Q, arc[1]);
+
+                    // First argument passes in only one vertex 
+                    // because algorith leaves the second untouched
+                    queueAffectedNodes(Q, [cnst.to[0]], cnst); 
                 }
                 break;
             case NARY:
-                if(arc[CNST].global) {
                     var reviseParams = [];
-                    var result = arc[CNST].check(arc[1], reviseParams);
-                    if(result) {
-                        reviseParams.push(inferences); // will pass them into custom global
-                        var modified = arc[CNST].global.apply(null, reviseParams); // logic has a global override
+                    var result = cnst.check(cnst.to, reviseParams); // TODO ensure that this is the same statement as the BINARY/UNARY case (use a cycle if I have to)
+                if(result) {
+                    if(cnst.global) { // constraint has a revision override
+                        // We must pass inferences long to be modified
+                        reviseParams.push(inferences); 
+                        //var start = Date.now();
+                        var modified = cnst.global.apply(null, reviseParams); 
+                        //var end = Date.now();
+                        //INSTRUMENTATION+=(end-start);
+                        //INSTCOUNT++;
                         if(modified) {
-                            //console.log('Domains modified by cusom revision function.');
-                            for(var v in arc[1]) {
-                                if(arc[1][v].domain.length === 0)
-                                    return FAILURE;
-                                else queueAffectedNodes(Q, (_.without(arc[1], v).unshift(v)));
-                            } 
+                            var broken = _.some(cnst.to, function(affected){ return affected.domain.length === 0 });
+                            if(broken) 
+                                return FAILURE;
+                            else 
+                                queueAffectedNodes(Q, cnst.to, cnst);
                         } 
-                    } else {
-                        //console.log('FAILURE returned from nary constraint');
-                        return FAILURE; 
-                    }
-                } else console.warn('Not yet implemented');
+                    }// else console.warn('Constraint WILL NOT revise, nary currently requires revision override!');
+                } else return FAILURE; // failed the constraint
                 break;
             default:
                 break;
@@ -661,6 +721,10 @@ csp.prototype.solve = function() {
                 "\nmax depth: "+this.stats.max +
                 "\ninferences: "+this.stats.inf +
                 "\nbacktracks: "+this.stats.backtracks+"\n\n\n");
+
+        if(INSTRUMENTATION > 0) 
+            console.log('Instrumentation time: '+INSTRUMENTATION + '\n(ran '+INSTCOUNT+' times)');
+
         printSolution(solution);
     } else console.log("Failed to find a solution");
 }
@@ -752,6 +816,7 @@ csp.prototype.revert = function(inferences) {
     }
 }
 
+// TODO advised to select the variable{s} with the smallest remaining domain, THEN most constrained
 // TODO use array, not map, and sort on the array during csp construction
 csp.prototype.getMostConstrainedVar = function() {
     var most; // most so far
@@ -784,7 +849,8 @@ csp.prototype.backTrack = function(assignment) {
         return assignment;
 
     var inferences;
-    for(var vn in this.domain) {
+    // If we want to choose least constraining, we have to infer for every value first!!!
+    for(var vn=0; vn<this.domain.length; vn++) {
         var valNode = this.domain[vn];
         //console.log('testing '+considered.info+' = '+valNode.info);
         if(hasDomainValue(considered, valNode.info)) {
@@ -839,19 +905,14 @@ csp.prototype.buildConstraintGraph = function() {
             case UNARY:
                 break;
             case BINARY:
-                _.each(this.cMap[type], function(cc){
-                    for(var i=0; i<cc.scope.length; i++) {
-                        //if(!cc.scope[i]) continue; - FIXED TODO remove if verified
-                        var vertex = self.vMap[cc.scope[i].info]; // get from the collection
-                        cc.to.push(vertex);
-                        var others = _.without(cc.scope, vertex.info);
-                        _.each(others, function(affected){
-                            vertex.addConstraint(cc);
-                        });
-                    }
-                });
-                break;
             case NARY:
+                // for each constraint
+                _.each(this.cMap[type], function(cc){
+                    // for each node affected by it
+                    _.each(cc.to, function(vertex){
+                        vertex.addConstraint(cc);
+                    });
+                });
                 break;
             default:
                 break;
