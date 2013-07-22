@@ -338,6 +338,8 @@ var buildMatchingGraph = function(vars) {
     var source = new Vertex(null);
     var sink = new Vertex(null);
 
+    // This will be unecessary if I build the graph initially, as it will be wiped every use.
+    // TODO remove pieces if sharing is successful!!!
     var sunkenDomain = {};
     _.each(vars, function(rangeNode) {
         source.addAssignment(new Assignment(source, rangeNode));
@@ -523,6 +525,7 @@ function initializeQueue(constraints, Q) {
     }
 
     var ALL_DIFF_SIMPLE = function(vars, passed) {
+
         function isAssigned(v) {
             return v.domain.length === 1;
         }
@@ -559,6 +562,9 @@ function initializeQueue(constraints, Q) {
     }
 
     var ALL_DIFF = function(vars, passed) {
+        /*
+         * I will now use the closure nature of this method to share the domain graph between iterations
+         */
 
         // ALL_DIFF_STUPID inclusion to avoid checking in the straightforward cases
         function isAssigned(v) {
@@ -574,13 +580,14 @@ function initializeQueue(constraints, Q) {
 
         // Not all assigned: original function continues below
 
-        var flowGraph = buildMatchingGraph(vars);
-        var maxFlow = flowGraph.maxFlow(flowGraph.source, flowGraph.sink);  // TODO add wrapper function to graph
+        //var flowGraph = buildMatchingGraph(vars);
+
+        var maxFlow = this.flowGraph.maxFlow(flowGraph.source, flowGraph.sink);  // TODO add wrapper function to graph
         //var start = Date.now();
-        flowGraph.demote(); // safely cleans and prepares the graph state
+        this.flowGraph.demote(); // safely cleans and prepares the graph state
         //var end = Date.now();
 
-        passed.push(flowGraph); // optionally hand back arguments for custom revision function
+        //passed.push(this.flowGraph); // NO LONGER NECESSARY IN THIS CODE-BRANCH, AS NO PARAMS ARE REQUIRED
 
         //INSTRUMENTATION += (end-start);
         //INSTCOUNT++;
@@ -590,14 +597,17 @@ function initializeQueue(constraints, Q) {
     }
 
 
-    GLOBAL['ALLDIFF_REVISE'] = function(flowGraph, inferences) {
-        if(!flowGraph || !inferences) return [];
+    GLOBAL['ALLDIFF_REVISE'] = function(NOT_USED, inferences) {
+        if(!this.flowGraph || !inferences) {
+            console.eror('MAJOR PROBLEM, GLOBAL CLOSURE NOT WORKING');
+            return [];
+        }
 
-        var start = Date.now();
-        var components = flowGraph.getStrongComponents(); // rename
-        var end = Date.now();
-        INSTRUMENTATION += (end-start);
-        INSTCOUNT++;
+        //var start = Date.now();
+        var components = this.flowGraph.getStrongComponents(); // rename
+        //var end = Date.now();
+        //INSTRUMENTATION += (end-start);
+        //INSTCOUNT++;
         
         var notInMatching = _.difference(this.edges, this.matching);
 
@@ -666,7 +676,7 @@ function ac3(csp, inferences) {
                         // We must pass inferences long to be modified
                         reviseParams.push(inferences); 
                         //var start = Date.now();
-                        var modified = cnst.global.apply(null, reviseParams); 
+                        var modified = cnst.global.apply(cnst, reviseParams);  // IN THIS CODE-BRANCH, I MUST MAINTAIN THE CLOSURE SCOPE
                         //var end = Date.now();
                         //INSTRUMENTATION+=(end-start);
                         //INSTCOUNT++;
