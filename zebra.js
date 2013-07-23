@@ -43,6 +43,7 @@ Vertex.prototype = {
     info: null,
     domain: null,
     constraints: null,
+    // TODO consider using adjacency list in DomainGraph to do all domain lookups,
     addAssignment: function(assn) {
         if(!(assn.id in this.connections)) {
             this.connections.push(assn.id);
@@ -89,31 +90,36 @@ Assignment.prototype.constructor = Assignment;
 
 var Graph = function(v, e, d) {
     this.vIndex = []; // compare performance of single map
-    this.vertices = v || [];
+    this.vertices = [];
     
-    this.edges = e || [];
+    this.edges = [];
     this.adj = {};
     this.connections = [];
     this.directed = d || false;
 
-    function addAdjacent(e) {
+    var graph = this;
+    _.each(v, function(node){ graph.addVertex(node);});
+    _.each(e, function(edge){graph.addEdge(edge);});
+}
+Graph.prototype = {
+    // FIXME remove this, use traditional graph adj
+    addAdjacent: function(e) {
         if(e.from) {
             if(e.from.id in this.adj)
                 this.adj[e.from.id].push(e);
             else this.adj[e.from.id] = [ e ];
         }
-    }
+    },
 
-
-
-    this.addVertex = function(v) {
+    addVertex: function(v) {
         if(this.vIndex.indexOf(v.id) === -1) {
             this.vertices.push(v);
             this.vIndex.push(v.id);
         } 
-       // else console.log('addVertex: blocked vertex');
-    }
-    this.addEdge = function(e) {
+        else console.log('addVertex: blocked vertex');
+    },
+
+    addEdge: function(e) {
         if(this.connections.indexOf(e.id) === -1) {
             this.connections.push(e.id);
             this.edges.push(e);
@@ -122,8 +128,9 @@ var Graph = function(v, e, d) {
         //    console.log('addEdge: edge blocked with info ' + e.from.info);
             addAdjacent.call(this, e);
         }
-    };
-    this.refreshIndex = function() {
+    },
+
+    refreshIndex: function() {
         this.connections = [];
         for(var e=0; e<this.edges.length; e++)
             this.connections.push(this.edges[e].id);
@@ -139,27 +146,14 @@ var Graph = function(v, e, d) {
             });
         }
     }
-
-    // ensures index if constructor accepted arrays. Unique NOT enforced!
-    var graph = this;
-    _.each(this.vertices, function(v){graph.addVertex(v);});
-    _.each(this.edges, function(e){graph.addEdge(e);});
 }
-var tmpGraph = function(){};
-tmpGraph.prototype = Graph.prototype;
 
-// TODO add constraints/variables as array, for sorting purposes?
-// (currently using map on csp object)
-var ConstraintGraph = function (vertices, directed) {
-    Graph.call(this, vertices, null, directed);
-};
-ConstraintGraph.prototype = new tmpGraph();
-ConstraintGraph.prototype.constructor = ConstraintGraph;
+var BipartiteFlowGraph = function(source, reversedSink, v, e) { // TEMPORARY ADDITIONAL VARS?
 
-var BipartiteFlowGraph = function(source, reversedSink) {
-    //console.log('reverse links: '+reversedSink.domain.length);
-
-    Graph.call(this, null, null); 
+    console.log('flowGraph: v: '+v.length);
+    Graph.call(this, v, e); 
+    console.log('flowGraph vertices after: ' + this.vertices.length);
+    for(var v in this.vertices) console.log(this.vertices[v].id);
     this.source = source;
     this.sink = reversedSink; // reminder to fix it first
     this.flow = {};
@@ -197,22 +191,25 @@ var BipartiteFlowGraph = function(source, reversedSink) {
             self.addEdge(edge);
             self.addEdge(redge);
 
-            // Set graph up to gracefully decompose later
-            if(node.info === self.sink.info || node.info === self.source.info) {
+            /* Set graph up to gracefully decompose later
+            if(node === self.sink || node === self.source) {
                 self.clean.push(edge);
-            }
+            } */
+
+            self.clean.push(edge);
             self.clean.push(redge);
 
-         //   console.log('adding vertex '+destNode.info+' with id: '+destNode.id);
             self.addVertex(destNode);
 
             if(follow) integrateNode(destNode, false);
         });
     }
 
+    /*
     integrateNode.call(this, source, true);
     integrateNode.call(this, reversedSink);
     initializeFlow.call(this, true);
+    */
 
     this.flush = function() { 
         return initializeFlow.call(this, true);
@@ -220,12 +217,16 @@ var BipartiteFlowGraph = function(source, reversedSink) {
 
     // Will be total at first, then gradually only what is necessary
     this.rebuild = function(vars) { 
+        /*
+        debugger;
         this.matching = null; // will trigger richer clean in demote
         this.vertices = [];
+        this.edges = [];
         this.clean = []; // ugh
         this.demote(); // FIXM_E
         this.flush();
         this.refreshIndex();
+        */
 
         
 
@@ -234,7 +235,7 @@ var BipartiteFlowGraph = function(source, reversedSink) {
         // make this come from sink, not passed in vars!!!
         _.each(vars, function(rangeNode) {
             // THIS MAY STILL BE NEEDED!
-            //graph.source.addAssignment(new Assignment(source, rangeNode));
+            graph.source.addAssignment(new Assignment(source, rangeNode));
             _.each(rangeNode.domain, function(domAssn) {
                 //console.log('establishing domain link');
                 var domNode = domAssn.to[0];
@@ -250,7 +251,6 @@ var BipartiteFlowGraph = function(source, reversedSink) {
         integrateNode.call(this, this.sink); 
         initializeFlow.call(this, true);
 
-        /*
         if(this.source) console.log('has a source');
         if(this.sink) console.log('has a sink');
         console.log('source has: '+this.source.domain.length);
@@ -285,6 +285,7 @@ var BipartiteFlowGraph = function(source, reversedSink) {
             delete e.redge;
         });
         this.edges = _.difference(this.edges, this.clean);
+        console.log('cleaned edges:  '+this.edges.length);
         this.refreshIndex();
     };
 
@@ -330,6 +331,7 @@ var BipartiteFlowGraph = function(source, reversedSink) {
         if(src === dst || src.id === dst.id) 
             return path;
 
+        console.log('edj lookup: '+src.id);
         var edj = this.adj[src.id];
         for(var i = 0; i < edj.length; i++) {
             var edge = edj[i];
@@ -350,7 +352,7 @@ var BipartiteFlowGraph = function(source, reversedSink) {
         }
     };
 }
-BipartiteFlowGraph.prototype = new tmpGraph();
+BipartiteFlowGraph.prototype = Graph.prototype;
 BipartiteFlowGraph.prototype.constructor = BipartiteFlowGraph;
 
 
@@ -372,10 +374,6 @@ var getConstraint = function(scope, rel, optional) {
     cnst.to = to;
     cnst.from = from;
 
-    // IMPORTANT: Changing the workings of Constraint to contain a shared flowgraph
-    cnst.flowGraph = buildMatchingGraph(cnst.to);
-    
-
     if(opt === 'function') cnst.global = optional;
 
     return cnst;
@@ -386,50 +384,6 @@ var getConstraint = function(scope, rel, optional) {
 /////// UTILITY FUNCTIONS ////////////////////
 //#############################################
 
-/* The general strategy for my ALL-DIFF is as follows:
- * Construct Bipartite Graph
- * Use flow theory to fail early on sub-perfect maximal
- * Use Hopcroft-Karp to find perfect matching 
- * Decompose graph into strongly connected components
- * Prune edges by removing component-bridges
-**/
-
-// The r-edges from sink->domain COULD in theory be re-used
-var buildMatchingGraph = function(vars) {
-    // There is a hack that says k-regular MUST have perfect matching
-    // If I take advantage of that, can I still prune?
-    function pv() {
-        var restr="\n";
-        for(var vi=0; vi<vars.length; vi++ ) {
-            restr+=vars[vi].info+": ";
-            for(var di=0; di < vars[vi].domain.length; di++) {
-                restr += vars[vi].domain[di].to[0].info+"\n";
-            }
-        }
-        //console.log(restr);
-    }
-
-    var source = new Vertex(null);
-    var sink = new Vertex(null);
-
-    // This will be unecessary if I build the graph initially, as it will be wiped every use.
-    // TODO remove pieces if sharing is successful!!!
-    var sunkenDomain = {};
-    _.each(vars, function(rangeNode) {
-        source.addAssignment(new Assignment(source, rangeNode));
-        _.each(rangeNode.domain, function(domAssn) {
-            var domNode = domAssn.to[0];
-            if(!(domNode.id in sunkenDomain)) {
-                var redge = new Assignment(sink, domNode);
-                sink.addAssignment(redge);
-                sunkenDomain[domNode.id] = true;
-            }
-        });
-    });
-
-
-    return  new BipartiteFlowGraph(source, sink);
-}
 
 // This function will be called in the context of the Bipartite Graph
 function getStrongComponents() {
@@ -635,6 +589,13 @@ function initializeQueue(constraints, Q) {
         }
     }
 
+    /* The general strategy for my ALL-DIFF is as follows:
+     * Construct Bipartite Graph
+     * Use flow theory to fail early on sub-perfect maximal
+     * Use Hopcroft-Karp to find perfect matching 
+     * Decompose graph into strongly connected components
+     * Prune edges by removing component-bridges
+    **/
     var ALL_DIFF = function(vars, passed) {
 
         passed.push(null); // NO LONGER NECESSARY IN THIS CODE-BRANCH, AS NO PARAMS ARE REQUIRED
@@ -659,12 +620,12 @@ function initializeQueue(constraints, Q) {
 
         // Not all assigned: original function continues below
 
-        //var flowGraph = buildMatchingGraph(vars);
-        this.flowGraph.rebuild(this.to);
+        this.domainGraph.rebuild(this.to);
 
         //var start = Date.now();
-        var maxFlow = this.flowGraph.maxFlow(this.flowGraph.source, this.flowGraph.sink);  // TODO add wrapper function to graph
-        this.flowGraph.demote(); // safely cleans and prepares the graph state
+        var maxFlow = this.domainGraph.maxFlow(this.domainGraph.source, this.domainGraph.sink);  // TODO add wrapper function to graph
+        console.log('MAX flow: ' + maxFlow);
+        this.domainGraph.demote(); // safely cleans and prepares the graph state
         //var end = Date.now();
 
 
@@ -748,13 +709,14 @@ function ac3(csp, inferences) {
                 break;
             case NARY:
                     var reviseParams = [];
-                    var result = cnst.check(cnst.to, reviseParams); // TODO ensure that this is the same statement as the BINARY/UNARY case (use a cycle if I have to)
+                    debugger;
+                    var result = cnst.check.call(csp, cnst.to, reviseParams); // TODO ensure that this is the same statement as the BINARY/UNARY case (use a cycle if I have to)
                 if(result) {
                     if(cnst.global) { // constraint has a revision override
                         // We must pass inferences long to be modified
                         reviseParams.push(inferences); 
                         //var start = Date.now();
-                        var modified = cnst.global.apply(cnst, reviseParams);  // IN THIS CODE-BRANCH, I MUST MAINTAIN THE CLOSURE SCOPE
+                        var modified = cnst.global.apply(csp, reviseParams); // Constraints are applied in the context of the CSP now
                         //var end = Date.now();
                         //INSTRUMENTATION+=(end-start);
                         //INSTCOUNT++;
@@ -804,12 +766,11 @@ var csp = function(variables, domain, constraints) {
         cMap[cnst.type].push(cnst);
     });
 
-
-    // before building, we want all variables in vMap, all edges (constraints+assignments)
+    // before building, we want all variables in vMap
     this.buildConstraintGraph();
-
-    // TODO sort variables by inspecting constraints
+    this.buildDomainGraph();
 }
+
 
 
 csp.prototype.solve = function() {
@@ -994,20 +955,11 @@ csp.prototype.buildConstraintGraph = function() {
     console.log('Number of nary constraints: '+self.cMap[NARY].length);
 
     var vertices = [];
-    // consider adding constraint/assignment arrays
-
-    _.each(this.vMap, function(varNode){
-        vertices.push(varNode); // add to graph collection
-        _.each(self.domain, function(valNode){
-            var ass = new Assignment(varNode, valNode);
-            //ass.capacity = Infinity;
-            varNode.addAssignment(ass);
-        });
-    });
+    _.each(this.vMap, function(varNode){ vertices.push(varNode); });
 
     for(var type in this.cMap){
         switch(parseInt(type)) {
-            case UNARY:
+            case UNARY: // no cycles, need only apply once
                 break;
             case BINARY:
             case NARY:
@@ -1024,7 +976,36 @@ csp.prototype.buildConstraintGraph = function() {
         }
     }
 
-    var graph = new ConstraintGraph(vertices);
+    var graph = new Graph(vertices); // REMOVED ConstraintGraph for now due to prototype conflict
+}
+
+// Move into CSP, consolidate logic
+csp.prototype.buildDomainGraph = function() {
+    var source = new Vertex(null);
+    var sink = new Vertex(null);
+    
+    var vertices = []; // TODO create prototype chain and below:
+    /*
+     * ConstraintGraph object and FlowGraph will share the same
+     * Prototype object, and the two graphs will add vertices/edges
+     * to that object.  In this manner, the objects will be shared
+     * and in effect we will have two views of the same graph.
+     *
+     * consider: addDomainNode() --> which call this.addVertex(...)
+     * or this.prototype.addVertex() // seems unnecessary but I've seen this
+     */
+
+    var self = this;
+    _.each(this.vMap, function(varNode){
+        vertices.push(varNode); // add to graph collection
+        _.each(self.domain, function(valNode){
+            var ass = new Assignment(varNode, valNode);
+            varNode.addAssignment(ass); // TODO decide if adding assignment to vertex makes any sense at all
+            // More importantly is there a good way to share the edges efficiently so they are never reconstructed?
+        });
+    });
+
+    this.domainGraph = new BipartiteFlowGraph(source, sink, vertices, null);
 }
 
 
@@ -1045,18 +1026,18 @@ var constraints = [
     [ ["kit-kat", "horse"], NEXT ],
     [ ["coffee", "green"], SAME ],
     [ ["milk"], VALUE, [3]],
-    /*
     [ people, ALL_DIFF ],
     [ pets, ALL_DIFF ],
     [ colors, ALL_DIFF ],
     [ drinks, ALL_DIFF ],
     [ candies, ALL_DIFF ]
-    */
+    /*
     [ people, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ pets, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ colors, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ drinks, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ candies, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ]
+    */
 ];
 
 var problem = new csp(variables, domain, constraints);
