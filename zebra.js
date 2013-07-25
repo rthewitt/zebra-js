@@ -2,6 +2,8 @@
  *  Currently shrinking code-base and making it significatnly more efficient
  *  Experimented with comparing ALL_DIFF global/n-ary constraints,
  *  How I'm interested in exploring n-ary in general, possibly auto-conversion
+ *  FIXME somehow, yellow ends up with MORE than five in the domain after reverting
+ *  and if I remember running without inferences, components > 10 with unrelated variables
  */
 var _ = require('underscore');
 
@@ -202,39 +204,7 @@ var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
         });
     }
 
-    /*
-    function integrateNode(node, follow) {
-
-        var nodeDomain = self.adj[node.id];
-        _.each(nodeDomain, function(edge) {
-            var destNode = edge.to[0];
-            console.log('integrate to node '+destNode.info+' which has '+(destNode.domain ? destNode.domain.length : 'UNDEFINED')+' in domain');
-
-            // We are passing in a sink connected to domain,
-            // so we have to reverse our logic. (Assignment inheritance not working)
-            var redge = new Assignment(destNode, edge.from, 0);
-            if(node === self.sink) {
-                edge.capacity = 0;
-                redge.capacity = 1;
-            } else redge.capacity = 0;
-    
-            edge.redge = redge;
-            redge.redge = edge;
-
-            self.addEdge(edge);
-            self.addEdge(redge);
-
-            self.clean.push(edge);
-            self.clean.push(redge);
-
-            self.addVertex(destNode);
-
-            if(follow) integrateNode(destNode, false);
-        });
-    } */
-
     this.rebuild = function(vars) { 
-        console.log('REBUILD');
         var flowGraph = this;
 
         this.flush();
@@ -244,12 +214,6 @@ var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
             if(vars.indexOf(sourceLink.to[0]) !== -1)
                 sourceLink.capacity = 1;
         });
-
-        /* re-activate sink
-        _.each(this.adj[this.sink.id], function(sinkLink){
-            if(sinkLink.from !== flowGraph.sink)
-                sinkLink.capacity = 1; 
-        }); */
 
         // Activate the pipes
         _.each(vars, function(variable) {
@@ -264,6 +228,7 @@ var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
             });
         });
 
+        /*
         console.log('source has: '+this.adj[this.source.id].length);
         console.log('sink has: '+this.adj[this.sink.id].length);
 
@@ -272,6 +237,7 @@ var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
         console.log('flowGraph has '+this.vertices.length+' vertices');
         console.log('flowGraph range: '+this.range.length);
         console.log('flowGraph domain: '+this.domain.length);
+        */
     }
 
     this.addEdge = function(e) {
@@ -306,28 +272,17 @@ var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
 
     // FIXME
     // Gracefully degrade to bipartite with matching bidirectionality
-    this.demote = function() {
-        var self = this;
-        // We need to make sure not to eliminate return paths from maximal matching
-        if(typeof this.matching != undefined &&
-                this.matching instanceof Array) {
-            var returnPaths = _.map(self.matching, function(match){return match.redge});
-            this.clean = _.difference(self.clean, returnPaths);
-        }
-
-        // TODO change to adj
-        _.each(this.edges, function(e){
-            delete e.flow;
-            delete e.redge;
+    this.demote = function(vars) {
+        this.flush();
+        // Decomposition will only traverse edges with capacity
+        _.each(this.matching, function(match){ match.redge.capacity = 1; });
+        _.each(vars, function(variable){
+            _.each(variable.domain, function(assn) { assn.capacity = 1; });
         });
-        // FIXME does not modify adjacency list, also does not re-use edges
-        this.edges = _.difference(this.edges, this.clean);
-        console.log('cleaned edges:  '+this.edges.length);
+        //_.each(this.edges, function(e){if(e.capacity > 0) console.log('CAPACITY: '+e.capacity+' '+e);});
+        //_.each(this.edges, function(e){ delete e.redge; });
+        //debugger;
     };
-
-    this.getStrongComponents =  function() {
-        return getStrongComponents.call(this);
-    }
 
     this.maxFlow = function(source, sink) {
         console.log('MAXFLOW function');
@@ -340,8 +295,8 @@ var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
         }
         
         this.edges.sort(capSort);
-        _.each(this.edges, function(e){console.log('CAPACITY: '+e.capacity+' '+e);});
-        debugger;
+        //_.each(this.edges, function(e){console.log('CAPACITY: '+e.capacity+' '+e);});
+        //debugger;
         this.matching = [];
         var path = this.findPath(source, sink, []);
 
@@ -376,7 +331,7 @@ var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
 
     this.findPath = function (src, dst, path) {
         if(src === dst || src.id === dst.id) {
-            console.log('src == sink, returning path of length '+path.length); 
+           // console.log('src == sink, returning path of length '+path.length); 
             return path;
         }
 
@@ -391,9 +346,10 @@ var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
                 if(step.edge.id === edge.id)
                     inPath = true;
             });
+            /*
             if(!inPath && residual > 0)
                 console.log(''+edge +' with capacity: '+edge.capacity+' and flow: '+this.flow[edge.id]);
-            //else console.log('skipping ' + edge);
+            */
 
             if(residual > 0 && !inPath) {
                 var newPath = path.concat([{ edge: edge, res: residual }]);
@@ -408,21 +364,31 @@ var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
 }
 BipartiteFlowGraph.prototype = new Graph();
 BipartiteFlowGraph.prototype.selectValue = function(rangeNode, domainNode) {
-    rangeNode.domain = [];
+    var edge;
     var removed = [];
+
     _.each(this.adj[rangeNode.id], function(assn){
         if(assn instanceof Assignment) {
-            if(assn.to[0] === domainNode) {
-                assn.capacity = 1;
-                rangeNode.domain.push(assn);
-            } else {
-                assn.capacity = 0;
-                removed.push(assn);
-            }
+            if(rangeNode.domain.indexOf(assn) !== -1) {
+                if(assn.to[0] === domainNode) {
+                    assn.capacity = 1;
+                    edge = assn;
+                } else {
+                    assn.capacity = 0;
+                    removed.push(assn);
+                }
+            } else assn.capacity = 0;
         }
     });
+
+    if(!edge) 
+        throw "Could not find "+domainNode.info+" in the domain of "+rangeNode.info;
+
+    rangeNode.domain = _.difference(rangeNode.domain, removed);
+
     if(rangeNode.domain.length !== 1) 
         throw "Could not select "+domainNode.info+" from the domain of "+rangeNode.info;
+
     return  [{ variable: rangeNode, edges: removed }]; // standard inference form
 }
 
@@ -456,7 +422,7 @@ var getConstraint = function(scope, rel, optional) {
 
 
 // This function will be called in the context of the Bipartite Graph
-function getStrongComponents() {
+BipartiteFlowGraph.prototype.getStrongComponents = function(vars) {
     var graph = this;
 
     var uglyHackMap = {}; // TODO remove this collection
@@ -467,8 +433,14 @@ function getStrongComponents() {
 
     var components = [];
 
-    for(var idx in this.vertices) {
-        var v = this.vertices[idx];
+    var vertz = vars.concat(this.domain); // We want a sub-graph
+    /*
+    var look = _.map(vertz, function(v){return v.info});
+    console.log('LOOK: '+look);
+    */
+
+    for(var idx in vertz) {
+        var v = vertz[idx];
         if(!(v.id in dpfIndex))
             strongConnect(v)
     }
@@ -482,12 +454,15 @@ function getStrongComponents() {
         dpfStack.push(v.id); // TODO I may be able to just push the vertex directly
 
         _.each(graph.adj[v.id], function(edge) {
-            var w = edge.to[0]; // successor node
-            if(!(w.id in dpfIndex)) {
-                strongConnect(w);
-                statV.lowlink = Math.min(statV.lowlink, dpfIndex[w.id].lowlink);
-            } else if(dpfStack.indexOf(w.id) !== -1) // the domain node is in the stack, which means it's in the current SCC
-                statV.lowlink = Math.min(statV.lowlink, dpfIndex[w.id].index);
+            if(edge.capacity === 1) { // traversable
+                //console.log('WALKING ACROSS: '+edge);
+                var w = edge.to[0]; // successor node
+                if(!(w.id in dpfIndex)) {
+                    strongConnect(w);
+                    statV.lowlink = Math.min(statV.lowlink, dpfIndex[w.id].lowlink);
+                } else if(dpfStack.indexOf(w.id) !== -1) // the domain node is in the stack, which means it's in the current SCC
+                    statV.lowlink = Math.min(statV.lowlink, dpfIndex[w.id].index);
+            }
         });
 
         // if v is a root node, pop the stack and generate a component
@@ -495,7 +470,8 @@ function getStrongComponents() {
             var scc = [];
             do {
                 var p = dpfStack.pop(); // id of previously pushed node
-                scc.push(p);
+                //scc.push(uglyHackMap[p].info); // FIXME
+                scc.push(p); // FIXME
             } while(p !== v.id);
             components.push(scc);
         }
@@ -517,6 +493,8 @@ function sortQ(a, b) {
 }
 
 function isInDomain(rangeNode, valNode) {
+    if(!rangeNode) 
+        throw "Problem during domain check";
     return _.some(rangeNode.domain, function(assn){
         return assn.to[0] === valNode;
     });
@@ -636,7 +614,7 @@ function initializeQueue(constraints, Q) {
     **/
     var ALL_DIFF = function(vars, passed) {
 
-        passed.push(null); // NO LONGER NECESSARY IN THIS CODE-BRANCH, AS NO PARAMS ARE REQUIRED
+        passed.push(vars); // We will use these in our revision function to limit the component graph
 
         /*
          * I will now use the closure nature of this method to share the domain graph between iterations
@@ -663,9 +641,9 @@ function initializeQueue(constraints, Q) {
         //var start = Date.now();
         var maxFlow = this.domainGraph.maxFlow(this.domainGraph.source, this.domainGraph.sink);  // TODO add wrapper function to graph
         if(maxFlow === vars.length) console.log('GOOD');
-        console.log('MAX flow: ' + maxFlow);
+        //console.log('MAX flow: ' + maxFlow);
 
-        this.domainGraph.demote(); // safely cleans and prepares the graph state
+        this.domainGraph.demote(vars); // safely cleans and prepares the graph state
         //var end = Date.now();
 
 
@@ -675,19 +653,28 @@ function initializeQueue(constraints, Q) {
     }
 
 
-    GLOBAL['ALLDIFF_REVISE'] = function(NOT_USED, inferences) {
+    GLOBAL['ALLDIFF_REVISE'] = function(vars, inferences) {
         if(!this.domainGraph || !inferences) {
             console.error('MAJOR PROBLEM, GLOBAL CLOSURE NOT WORKING');
             return [];
         }
 
         //var start = Date.now();
-        var components = this.flowGraph.getStrongComponents(); // rename
+        var components = this.domainGraph.getStrongComponents(vars); 
+        console.log('components size: '+components.length);
+        if(components.length > 9) {
+            console.log(components);
+            throw 'what';
+        }
         //var end = Date.now();
         //INSTRUMENTATION += (end-start);
         //INSTCOUNT++;
+
+        var dedges =  _.chain(vars)
+            .map(function(variable){ return variable.domain; })
+            .flatten(true).value();
         
-        var notInMatching = _.difference(this.edges, this.matching);
+        var notInMatching = _.difference(dedges, this.domainGraph.matching);
 
         var inf = _.chain(notInMatching)
             .map(function(match) {
@@ -700,18 +687,27 @@ function initializeQueue(constraints, Q) {
                 var deadEnd = [];
                 if(comp && comp.indexOf(match.to[0].id) === -1) {
 
-                    //console.log('SAFE TO REMOVE EDGE: ('+match.from.info+') -----> ('+match.to[0].info+')');
+                    console.log('SAFE TO REMOVE EDGE: ' + match);
+                    match.from.domain = match.from.domain = _.without(match.from.domain, match);
+                    deadEnd.push(match);
+                    /*
                     for(var di=0; di<match.from.domain.length; di++) {
                         var domainNode = match.from.domain[di];
                         if(domainNode.id === match.id) 
                             deadEnd.push(tt);
-                    }
+                    }*/
 
                     return { variable: match.from, edges: deadEnd };
                 } else return undefined;
             }).compact().value();
+        
 
         inferences.push.apply(inferences, inf);
+
+        /*
+        var str = _.map(inferences, function(ii){return ii.variable.info});
+        console.log('INFERENCES: ' +str);
+        */
 
         return inferences.length > 0; // modified?
     }
@@ -722,7 +718,6 @@ function initializeQueue(constraints, Q) {
 
 
 function ac3(csp, inferences) {
-    console.log('AC3');
     var Q = []; 
     initializeQueue(csp.cMap[UNARY], Q);
     initializeQueue(csp.cMap[BINARY], Q);
@@ -827,20 +822,27 @@ csp.prototype.solve = function() {
     var solution = this.backTrack(assignment);
     this.stats.time = (Date.now() - start);
 
-    if(solution !== FAILURE) {
-        console.log("\n\nSolved in "+
-                (this.stats.time < 1000 ? this.stats.time+" ms" : this.stats.time/1000+" seconds") + "!" +
+    function printStats(solved){
+        var hdr = !solved ? '\n\nNot solved... ' : '\n\nSolved in ' +
+                (this.stats.time < 1000 ? this.stats.time+" ms" : this.stats.time/1000+" seconds") + "!";
+        console.log(hdr +
                 "\ndepth: "+this.stats.depth +
                 "\nmax depth: "+this.stats.max +
                 "\ninferences: "+this.stats.inf +
                 "\nbacktracks: "+this.stats.backtracks+"\n\n\n");
+    }
 
+    if(solution !== FAILURE) {
+        printStats.call(this, true);
         if(INSTRUMENTATION > 0) 
             console.log('Instrumentation time: '+INSTRUMENTATION + '\n(ran '+INSTCOUNT+' times)');
 
         //console.log(solution);
         printSolution.call(this, solution);
-    } else console.log("Failed to find a solution");
+    } else {
+        printStats.call(this, false);
+        console.log("Failed to find a solution");
+    }
 }
 
 function printSolution(sol) {
@@ -924,10 +926,14 @@ csp.prototype.revert = function(inferences) {
     this.stats.backtracks++;
     //console.log('REVERTING');
     if(!inferences) return;
+    var need = inferences.length;
+    var cnt = 0;
     while(inferences.length > 0) {
+        cnt++;
         var inf = inferences.pop();
         _.each(inf.edges, function(edge){inf.variable.domain.push(edge);});
     }
+    if(cnt !== cnt) throw 'PROBABLY DIDN\'T REVERT ERROR';
 }
 
 // We want the variable with the smallest remaining domain
@@ -942,13 +948,24 @@ csp.prototype.getMostConstrainedVar = function() {
             return b.constraints.length - a.constraints.length;
     }
 
+    //var dL = _.map(this.graph.vertices, function(v){return v.info}).join('/');
+    //console.log('UNSORTED DOMAIN LENGTHS: '+dL);
     this.graph.vertices.sort(varSort);
+    //dL = _.map(this.graph.vertices, function(v){return v.info}).join('/');
+    //console.log('SORTED DOMAIN LENGTHS: '+dL);
+    for(var i=0; i<this.graph.vertices.length; i++) {
+        var variable = this.graph.vertices[i];
+        if( variable.domain.length > 1 ) return variable; // presorted
+    }
+    /*
     var most = null;
     for(var i=0; i<this.graph.vertices.length; i++) {
         var variable = this.graph.vertices[i];
-        if( variable.domain.length > 1) most = variable;
+        console.log('sort find: ' + variable.info + '\ndomain: '+variable.domain.length);
+        if( !most || variable.domain.length > most.domain.length) most = variable;
     }
     return most;
+    */
 }
 
 // In my hypergraph formulation, inferences are simply edges in the
@@ -971,9 +988,13 @@ csp.prototype.backTrack = function(assignment) {
     for(var vn=0; vn<this.domain.length; vn++) {
         var valNode = this.domain[vn];
         if(isInDomain(considered, valNode)) {
+            console.log('Trying ' + considered.info + ' : ' + valNode.info);
+            if(considered.info === 'yellow' && valNode.info === 5)
+                debugger;
             inferences = this.domainGraph.selectValue(considered, valNode);
             var ret = this.infer(assignment, inferences);
             if(ret !== FAILURE) { 
+                console.log('RECURSING');
                 var recur = this.backTrack(assignment);
                 if(recur !== FAILURE)
                     return recur;
@@ -981,9 +1002,15 @@ csp.prototype.backTrack = function(assignment) {
                 this.stats.backtracks++;
                 this.stats.depth = 0;
             }
-        } else console.log('FUCK');
+        } //else console.log('Could not select '+valNode.info +' from domain of length '+considered.domain.length);
+        var d = _.map(inferences, function(ii){return ii.variable.info}).join(', ');
+        console.log('Reverting: \n'+d);
         // completely revert
         this.revert(inferences); // adds the edges back into the graph
+        var problem = _.filter(this.graph.vertices, function(vv){return vv.domain.length !== 5});
+        var ylw = (_.map(problem, function(p){return p.info}));
+        var ylwd = (_.map(problem, function(p){return p.domain}));
+//        if(problem.length > 0) console.log('HERE BE DRAGONS: ' + ylw + ' : ' + ylwd);
     }
     return FAILURE;
 }
@@ -1050,6 +1077,13 @@ var constraints = [
     [ ["kit-kat", "horse"], NEXT ],
     [ ["coffee", "green"], SAME ],
     [ ["milk"], VALUE, [3]],
+    /*
+    [ people, ALL_DIFF ],
+    [ pets, ALL_DIFF ],
+    [ colors, ALL_DIFF ],
+    [ drinks, ALL_DIFF ],
+    [ candies, ALL_DIFF ]
+     */
     [ people, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ pets, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ colors, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
