@@ -1,7 +1,7 @@
 /*
- * I intend to create a bipartite graph from variables->values from the hypergraph.
- * Doing so will allow me to find a matching, and satisfy the arc-consistency
- * in regards to the AllDiff constraint.
+ *  Currently shrinking code-base and making it significatnly more efficient
+ *  Experimented with comparing ALL_DIFF global/n-ary constraints,
+ *  How I'm interested in exploring n-ary in general, possibly auto-conversion
  */
 var _ = require('underscore');
 
@@ -31,149 +31,180 @@ var GLOBAL = {};
 var Vertex = function(info) {
     this.id = _generateID(); // HANDLE COLLISIONS
     this.info = info;
-    this.domain = [];
-    this.constraints = [];
-    this.connections = []; // TODO handle removal case maybe
 };
-
-// Change implementation such that constraint _is_ an Edge
 Vertex.prototype = {
     id: null,
-    connections: null, // a set of unique ids of Edges
     info: null,
-    domain: null,
-    constraints: null,
-    // TODO consider using adjacency list in DomainGraph to do all domain lookups,
-    addAssignment: function(assn) {
-        if(!(assn.id in this.connections)) {
-            this.connections.push(assn.id);
-            this.domain.push(assn);
-        } else console.warn('Duplicate UUID found in addAssignment');
-    },
-    addConstraint: function(cnst) {
-        if(!(cnst.id in this.connections)) {
-            this.connections.push(cnst.id); // is this check redundant?
-            this.constraints.push(cnst);
-        }
-    }
 }
+var Variable = function(info) {
+    Vertex.call(this, info);
+    this.domain = [];
+}
+Variable.prototype = new Vertex();
+
+var Value = function(info) {
+    Vertex.call(this, info);
+}
+Value.prototype = new Vertex();
+
 
 var Edge = function(from, to, capacity) {
     this.from = from || null;
     this.to = to || null;
     this.capacity = capacity || 1;
-    this.isValidEdge = function() {
-        return this.to instanceof Array && this.to.length > 0 && 
-            this.from instanceof Array && this.from.length > 0;
-    }
 };
+Edge.prototype = {
+    from: null,
+    to: null,
+    toString: function() {
+                  var tail = '(' + ((!!this.from) ? (this.from.info !== null ? this.from.info : 'null') : '*') + ')';
+                  var head = '(' + _.map(this.to, function(t){ return (t.info !== null ? t.info : 'null') }).join(', ') + ')';
+                  return tail + ' -----> ' + head;
+              }
+}
 
 var UNARY=1, BINARY=2, NARY=3;
 var Constraint = function(type, relation, scope) {
     // TODO fix inheritence so that we can set edge here!
     this.id = _generateID(); // HANDLE COLLISIONS
     this.type = type;
+
     this.check = function() { 
         var params = Array.prototype.slice.call(arguments);
         return relation.apply(this, params);
     }
 };
 Constraint.prototype = new Edge();
-Constraint.prototype.constructor = Constraint;
+Constraint.prototype.interLock = function() {
+    var cnst = this;
+    _.each(this.to, function(variable) {
+        if(typeof variable.constraints === 'undefined')
+            variable.constraints = [];
+
+        if(!(cnst in variable.constraints)) 
+            variable.constraints.push(cnst);
+    });
+}
 
 var Assignment = function(from, valNode, capacity) {
     Edge.call(this, from, [valNode], capacity);
     this.id = _generateID(); // HANDLE COLLISIONS
 };
 Assignment.prototype = new Edge();
-Assignment.prototype.constructor = Assignment;
 
 var Graph = function(v, e, d) {
-    this.vIndex = []; // compare performance of single map
     this.vertices = [];
-    
     this.edges = [];
     this.adj = {};
-    this.connections = [];
     this.directed = d || false;
 
     var graph = this;
     _.each(v, function(node){ graph.addVertex(node);});
     _.each(e, function(edge){graph.addEdge(edge);});
 }
-Graph.prototype = {
-    // FIXME remove this, use traditional graph adj
-    addAdjacent: function(e) {
-        if(e.from) {
-            if(e.from.id in this.adj)
-                this.adj[e.from.id].push(e);
-            else this.adj[e.from.id] = [ e ];
-        }
-    },
 
+Graph.prototype = {
+    vertices: null,
+    edges: null,
+    adj: null,
+    directed: false,
     addVertex: function(v) {
-        if(this.vIndex.indexOf(v.id) === -1) {
+        if(this.vertices.indexOf(v) === -1) 
             this.vertices.push(v);
-            this.vIndex.push(v.id);
-        } 
-        else console.log('addVertex: blocked vertex');
+        //else console.log('addVertex: blocked vertex ' + v.info);
     },
 
     addEdge: function(e) {
-        if(this.connections.indexOf(e.id) === -1) {
-            this.connections.push(e.id);
+        if(this.edges.indexOf(e) === -1) {
             this.edges.push(e);
-            addAdjacent.call(this, e);
-        } else {
-        //    console.log('addEdge: edge blocked with info ' + e.from.info);
-            addAdjacent.call(this, e);
-        }
+            var self = this;
+            var coll = e.from ? e.to.concat(e.from) : e.to;
+            _.each(coll, function(node){
+                if(typeof self.adj[node.id] === 'undefined')
+                    self.adj[node.id] = [];
+                self.adj[node.id].push(e);
+            });
+        } //else console.log('Ignoring duplicate edge: ' + e);
     },
 
-    refreshIndex: function() {
-        this.connections = [];
-        for(var e=0; e<this.edges.length; e++)
-            this.connections.push(this.edges[e].id);
-
-        // Added for this branch, may mess up the algorithm
-        this.adj = {};
-        this.vIndex = [];
-        // End additions
-        
-        for(var e in this.adj) {
-            this.adj[e] = _.filter(this.edges, function(edge) {
-                return edge.from.id === e || edge.to[0].id === e; // Ugly specific hack
-            });
+    // FIXME partially implemented, NEVER used
+    removeEdge: function(e) {
+        if(this.edges.indexOf(e) !== -1) {
+            this.edges = _.without(this.edges, e);
+            if(e.from) this.adj[e.from.id] = _.without(this.adj[e.from.id], e);
+            var self = this;
+            _.chain(e.to)
+                .map(function(t){return t.id})
+                .each(function(id){ self.adj[id] = _.without(self.adj[id], e); });
         }
     }
 }
 
-var BipartiteFlowGraph = function(source, reversedSink, v, e) { // TEMPORARY ADDITIONAL VARS?
+var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
+    console.log('BFG called: ' + range.length + ' rangeNodes, '+domain.length+' domain');
+    Graph.call(this);
+    // Temporary, will combine graph objects using prototype pattern.  (Maybe)
+    // TODO remove and consolidate
+    this.vertices = [];
+    this.edges = [];
+    this.adj = {};
 
-    console.log('flowGraph: v: '+v.length);
-    Graph.call(this, v, e); 
-    console.log('flowGraph vertices after: ' + this.vertices.length);
-    for(var v in this.vertices) console.log(this.vertices[v].id);
-    this.source = source;
-    this.sink = reversedSink; // reminder to fix it first
+    this.source = source || new Vertex('source');
+    this.sink = reversedSink || new Vertex('sink');
+    this.range = range || [];
+    this.domain= domain || [];
     this.flow = {};
     this.clean = []; // will house edges that should be removed later
     this.matching = [];
 
-    var self = this;
+    // TODO change this to something universal or use adj?
+    this.source.domain = [];
+    this.sink.domain = []; 
 
-    function initializeFlow (flush) {
-        this.flow = this.flow || {};
-        var graph = this;
-        _.each(this.edges, function(edge) {
-            edge.flow = edge.flow && !flush ? edge.flow : 0;
-            graph.flow[edge.id] = edge.flow;
+    var initialize = function() {
+        var flowGraph = this;
+        _.each(this.range, function(variable) {
+            var sourceLink = new Edge(flowGraph.source, [variable]);
+            var redge = new Edge(variable, [flowGraph.source]);
+            sourceLink.redge = redge;
+            redge.redge = sourceLink;
+            flowGraph.addEdge(sourceLink);
+            flowGraph.addEdge(redge);
         });
-    };
 
+        _.each(this.range, function(variable) {
+            flowGraph.addVertex(variable); // When consolidated, this will be a duplicate step
+            _.each(flowGraph.domain, function(value){
+                flowGraph.addVertex(value);
+                var assn = new Assignment(variable, value);
+                var redge = new Edge(value, [variable]);
+                assn.redge = redge;
+                redge.redge = assn;
+                flowGraph.addEdge(assn);
+                flowGraph.addEdge(redge);
+            });
+        });
+
+        _.each(this.domain, function(value){
+            var sinkLink = new Edge(flowGraph.sink, [value]);
+            var redge = new Edge(value, [flowGraph.sink]);
+            sinkLink.redge = redge;
+            redge.redge = sinkLink;
+            flowGraph.addEdge(sinkLink);
+            flowGraph.addEdge(redge);
+        });
+
+        console.log('in initialize:');
+        _.each(this.edges, function(e){console.log(''+e);});
+    }
+
+    /*
     function integrateNode(node, follow) {
-        _.each(node.domain, function(edge) {
+
+        var nodeDomain = self.adj[node.id];
+        _.each(nodeDomain, function(edge) {
             var destNode = edge.to[0];
+            console.log('integrate to node '+destNode.info+' which has '+(destNode.domain ? destNode.domain.length : 'UNDEFINED')+' in domain');
 
             // We are passing in a sink connected to domain,
             // so we have to reverse our logic. (Assignment inheritance not working)
@@ -186,15 +217,8 @@ var BipartiteFlowGraph = function(source, reversedSink, v, e) { // TEMPORARY ADD
             edge.redge = redge;
             redge.redge = edge;
 
-            //destNode.addAssignment(redge);
-    
             self.addEdge(edge);
             self.addEdge(redge);
-
-            /* Set graph up to gracefully decompose later
-            if(node === self.sink || node === self.source) {
-                self.clean.push(edge);
-            } */
 
             self.clean.push(edge);
             self.clean.push(redge);
@@ -203,72 +227,118 @@ var BipartiteFlowGraph = function(source, reversedSink, v, e) { // TEMPORARY ADD
 
             if(follow) integrateNode(destNode, false);
         });
+    } */
+
+    this.rebuild = function(vars) { 
+        console.log('REBUILD');
+        var flowGraph = this;
+
+        // re-activate sink
+        _.each(this.adj[this.sink.id], function(sinkLink){
+            if(sinkLink.from !== flowGraph.sink)
+                sinkLink.capacity = 1; 
+        });
+
+        // Activate the pipes
+        _.each(vars, function(variable) {
+            // only consider possible assignments or links from the source
+            _.each(flowGraph.adj[variable.id], function(assn) {
+                if((assn instanceof Assignment && variable.domain.indexOf(assn) !== -1) 
+                    || assn.from === flowGraph.source)
+                    assn.capacity = 1;
+                else assn.capacity = 0; // deactivates unchosen, but also zeroes out redges unnecessarily
+            });
+        });
+
+        console.log('source has: '+this.adj[this.source.id].length);
+        console.log('sink has: '+this.adj[this.sink.id].length);
+
+        console.log('flowGraph has '+this.edges.length+' edges');
+        _.each(this.edges, function(e){console.log(''+e);});
+        console.log('flowGraph has '+this.vertices.length+' vertices');
+        debugger;
+        console.log('flowGraph range: '+this.range.length);
+        console.log('flowGraph domain: '+this.domain.length);
+
+        this.flush();
     }
 
-    /*
-    integrateNode.call(this, source, true);
-    integrateNode.call(this, reversedSink);
-    initializeFlow.call(this, true);
-    */
+    this.addEdge = function(e) {
+        //console.log('BPF addEdge:');
+        BipartiteFlowGraph.prototype.addEdge.call(this, e);
+        if(!e.from) console.error('Adding an undirected edge to flowGraph!');
+        else if(e instanceof Assignment) {
+            if(!e.from.domain) e.from.domain = [];
+            if(e.from.domain.indexOf(e) === -1)  {
+         //       console.log('Adding '+e+' to domain of '+e.from.info);
+                e.from.domain.push(e);
+            }
+        }
+    }
+
+    this.addVertex = function(v) {
+        BipartiteFlowGraph.prototype.addVertex.call(this, v);
+        if(v instanceof Variable && this.range.indexOf(v) === -1)
+            this.range.push(v);
+        if(v instanceof Value && this.domain.indexOf(v) === -1)
+            this.domain.push(v);
+    }
 
     this.flush = function() { 
-        return initializeFlow.call(this, true);
+        this.flow = this.flow || {};
+        _.each(this.edges, function(edge) { edge.flow = 0; });
     };
 
-    // Will be total at first, then gradually only what is necessary
-    this.rebuild = function(vars) { 
+    /*
+    this.rebuild = function(vars) {
+        console.log('STARTING REBUILD');
         /*
-        debugger;
         this.matching = null; // will trigger richer clean in demote
         this.vertices = [];
         this.edges = [];
         this.clean = []; // ugh
         this.demote(); // FIXM_E
-        this.flush();
-        this.refreshIndex();
         */
-
-        
+    /*
+        this.source.domain = [];
 
         var graph = this;
         var sunkenDomain = {};
+        debugger;
         // make this come from sink, not passed in vars!!!
         _.each(vars, function(rangeNode) {
-            // THIS MAY STILL BE NEEDED!
-            graph.source.addAssignment(new Assignment(source, rangeNode));
+
+            var link = new Assignment(graph.source, rangeNode)
+            
+           
+            graph.addEdge(link); // Changed to this, layer
+
             _.each(rangeNode.domain, function(domAssn) {
                 //console.log('establishing domain link');
                 var domNode = domAssn.to[0];
                 if(!(domNode.id in sunkenDomain)) {
+
                     var redge = new Assignment(graph.sink, domNode);
-                    graph.sink.addAssignment(redge);
+                    //graph.sink.addAssignment(redge);
+                    graph.addEdge(redge);
+
                     sunkenDomain[domNode.id] = true;
                 } //else console.log('found in sunken domain already');
             });
         });
 
-        integrateNode.call(this, this.source, true);
+        console.log('source before integration has: '+this.source.domain.length);
+        integrateNode.call(this, this.source, false); // FIXME
         integrateNode.call(this, this.sink); 
         initializeFlow.call(this, true);
 
-        if(this.source) console.log('has a source');
-        if(this.sink) console.log('has a sink');
         console.log('source has: '+this.source.domain.length);
         console.log('sink has: '+this.sink.domain.length);
 
         console.log('Now flowGraph has '+this.edges.length+' edges');
         console.log('Now flowGraph has '+this.vertices.length+' vertices');
-
-        /*
-        _.each(this.edges, function(e){
-            console.log(e.to[0].info);
-        });
-        _.each(this.vertices, function(v){
-            console.log(v.info);
-        });
-        */
-        
     }
+    */
 
     // Gracefully degrade to bipartite with matching bidirectionality
     this.demote = function() {
@@ -280,13 +350,14 @@ var BipartiteFlowGraph = function(source, reversedSink, v, e) { // TEMPORARY ADD
             this.clean = _.difference(self.clean, returnPaths);
         }
 
+        // TODO change to adj
         _.each(this.edges, function(e){
             delete e.flow;
             delete e.redge;
         });
+        // FIXME does not modify adjacency list, also does not re-use edges
         this.edges = _.difference(this.edges, this.clean);
         console.log('cleaned edges:  '+this.edges.length);
-        this.refreshIndex();
     };
 
     this.getStrongComponents =  function() {
@@ -294,6 +365,7 @@ var BipartiteFlowGraph = function(source, reversedSink, v, e) { // TEMPORARY ADD
     }
 
     this.maxFlow = function(source, sink) {
+        console.log('MAXFLOW function');
         var self = this;
         this.matching = [];
         var path = this.findPath(source, sink, []);
@@ -331,7 +403,7 @@ var BipartiteFlowGraph = function(source, reversedSink, v, e) { // TEMPORARY ADD
         if(src === dst || src.id === dst.id) 
             return path;
 
-        console.log('edj lookup: '+src.id);
+        //console.log('edj lookup: '+src.info+' id: '+src.id);
         var edj = this.adj[src.id];
         for(var i = 0; i < edj.length; i++) {
             var edge = edj[i];
@@ -351,10 +423,29 @@ var BipartiteFlowGraph = function(source, reversedSink, v, e) { // TEMPORARY ADD
             }
         }
     };
-}
-BipartiteFlowGraph.prototype = Graph.prototype;
-BipartiteFlowGraph.prototype.constructor = BipartiteFlowGraph;
 
+    initialize.call(this);
+}
+BipartiteFlowGraph.prototype = new Graph();
+BipartiteFlowGraph.prototype.selectValue = function(rangeNode, domainNode) {
+    rangeNode.domain = [];
+    var removed = [];
+    _.each(this.adj[rangeNode.id], function(assn){
+        if(assn instanceof Assignment) {
+            if(assn.to[0] === domainNode) {
+                assn.capacity = 1;
+                rangeNode.domain.push(assn);
+            } else {
+                assn.capacity = 0;
+                removed.push(assn);
+            }
+        }
+    });
+    debugger;
+    if(rangeNode.domain.length !== 1) 
+        throw "Could not select "+domainNode.info+" from the domain of "+rangeNode.info;
+    return  [{ variable: rangeNode, edges: removed }]; // standard inference form
+}
 
 var getConstraint = function(scope, rel, optional) {
     var type = (scope.length > 2 ? NARY : (scope.length < 2 ? UNARY : BINARY));
@@ -441,47 +532,15 @@ function _generateID () {
       return (S4()+S4()+"-"+S4()+"-"+S4()+"-"+S4()+"-"+S4()+S4()+S4());
 }
 
-function hasDomainValue(vrb, val) {
-    for(var d in vrb.domain) {
-        var assn = vrb.domain[d];
-        if(assn)
-            for(var valNode in assn.to) {
-                if(assn.to[valNode].info === val)
-                    return true;
-            }
-    }
-    return false;
-}
-
-function forceSelection(vrb, val) {
-    function relevant(edge) {
-        if(edge.to.length !== 1) throw "Assignment has wrong dimentionality";
-        return edge.to[0].info === val.info;
-    }
-    var assignment = _.filter(vrb.domain, relevant);
-    if(assignment.length !== 1) throw "Duplicate Domain!";
-    var inf = [{
-        variable: vrb,
-        edges: _.reject(vrb.domain, relevant)
-        }];
-    vrb.domain = assignment;
-    return inf;
-}
-
-    function containsConstraint(Q, cnst) {
-        var whut =_.some(Q, function(cc){ 
-            var retter =  cc[0].id === cnst.id
-        //if(retter) console.log('found: '+cc[0].id+ ' and '+cnst.id);
-        return retter;
-        });
-        if(!whut) console.log('returning '+whut);
-        return whut;
-    }
-
-
 function sortQ(a, b) {
     if(!a || !b) return 0;
     return a.type - b.type;
+}
+
+function isInDomain(rangeNode, valNode) {
+    return _.some(rangeNode.domain, function(assn){
+        return assn.to[0] === valNode;
+    });
 }
 
 /* The function below has changed so that now we are just appending constraints, NOT arcs
@@ -620,12 +679,13 @@ function initializeQueue(constraints, Q) {
 
         // Not all assigned: original function continues below
 
-        this.domainGraph.rebuild(this.to);
+        this.domainGraph.rebuild(vars);
 
         //var start = Date.now();
         var maxFlow = this.domainGraph.maxFlow(this.domainGraph.source, this.domainGraph.sink);  // TODO add wrapper function to graph
         console.log('MAX flow: ' + maxFlow);
-        this.domainGraph.demote(); // safely cleans and prepares the graph state
+        // FIXME
+        //this.domainGraph.demote(); // safely cleans and prepares the graph state
         //var end = Date.now();
 
 
@@ -683,6 +743,7 @@ function initializeQueue(constraints, Q) {
 
 
 function ac3(csp, inferences) {
+    console.log('AC3');
     var Q = []; 
     initializeQueue(csp.cMap[UNARY], Q);
     initializeQueue(csp.cMap[BINARY], Q);
@@ -743,14 +804,19 @@ function ac3(csp, inferences) {
 ////////// PROBLEM DEFINITION ////////////////
 //#############################################
   
+// TODO clean this up, removed unnecessary constructs
 var csp = function(variables, domain, constraints) {
     var self = this;
     this.stats = { depth: 0, max: 0, inf: 0, backtracks: 0, time: null};
-    this.domain = _.map(domain, function(val){return new Vertex(val);});
+    this.domain = _.map(domain, function(val){return new Value(val);});
+    this.range = [];
     this.vMap = {}; // ONLY WORKS WITH STRINGS / UUIDS!!!
     this.numVars = variables.length;
+
     _.each(variables, function(v){
-        self.vMap[v] = new Vertex(v);
+        var vrb = new Variable(v);
+        self.vMap[v] = vrb;
+        self.range.push(vrb);
     });
 
     var cMap = {};
@@ -768,7 +834,9 @@ var csp = function(variables, domain, constraints) {
 
     // before building, we want all variables in vMap
     this.buildConstraintGraph();
-    this.buildDomainGraph();
+
+    // TODO eliminate vMap
+    this.domainGraph = new BipartiteFlowGraph(this.range, this.domain);
 }
 
 
@@ -792,7 +860,8 @@ csp.prototype.solve = function() {
         if(INSTRUMENTATION > 0) 
             console.log('Instrumentation time: '+INSTRUMENTATION + '\n(ran '+INSTCOUNT+' times)');
 
-        printSolution(solution);
+        //console.log(solution);
+        printSolution.call(this, solution);
     } else console.log("Failed to find a solution");
 }
 
@@ -808,12 +877,13 @@ function printSolution(sol) {
 
     for(var i=0; i<5; i++) {
         for(var v in sol) {
-            for(var d in sol[v].domain) {
-                if(!sol[v].domain[d].to)
+            var solvDomain = this.graph.adj[sol[v].id];
+            for(var d in solvDomain) {
+                if(!solvDomain[d].to)
                     continue;
                 else {
                     var varName = sol[v].info;
-                    var houseNum = sol[v].domain[d].to[0].info-1;
+                    var houseNum = solvDomain[d].to[0].info-1;
                     if(people.indexOf(varName) !== -1)
                         houses[houseNum][per] = varName;
                     else if(pets.indexOf(sol[v].info) !== -1)
@@ -882,21 +952,26 @@ csp.prototype.revert = function(inferences) {
     }
 }
 
-// TODO advised to select the variable{s} with the smallest remaining domain, THEN most constrained
-// TODO use array, not map, and sort on the array during csp construction
+// We want the variable with the smallest remaining domain
+// that has the most constraints
 csp.prototype.getMostConstrainedVar = function() {
-    var most; // most so far
-    for(var name in this.vMap) {
-        var variable = this.vMap[name];
-
-        if(!variable instanceof Vertex || variable.domain.length < 2)  // Debugging only, TODO delete
-            continue;
-
-        if(!most || 
-                variable.constraints.length > most.constraints.length) 
-            most = variable;
+    function varSort(a,b) {
+        if(a.domain.length < b.domain.length)
+            return -1;
+        else if(a.domain.length > b.domain.length)
+            return 1;
+        else if(a.domain.length === b.domain.length)
+            return b.constraints.length - a.constraints.length;
     }
-    return most || null;
+
+    debugger;
+    this.graph.vertices.sort(varSort);
+    var most = null;
+    for(var i=0; i<this.graph.vertices.length; i++) {
+        var variable = this.graph.vertices[i];
+        if( variable.domain.length > 1) most = variable;
+    }
+    return most;
 }
 
 // In my hypergraph formulation, inferences are simply edges in the
@@ -910,6 +985,7 @@ csp.prototype.backTrack = function(assignment) {
         this.stats.max = this.stats.depth;
 
     var considered = this.getMostConstrainedVar();
+    debugger;
 
     if(considered === null) 
         return assignment;
@@ -918,10 +994,8 @@ csp.prototype.backTrack = function(assignment) {
     // If we want to choose least constraining, we have to infer for every value first!!!
     for(var vn=0; vn<this.domain.length; vn++) {
         var valNode = this.domain[vn];
-        //console.log('testing '+considered.info+' = '+valNode.info);
-        if(hasDomainValue(considered, valNode.info)) {
-            // verify boundary conditions
-            inferences = forceSelection(considered, valNode);
+        if(isInDomain(considered, valNode)) {
+            inferences = this.domainGraph.selectValue(considered, valNode);
             var ret = this.infer(assignment, inferences);
             if(ret !== FAILURE) { 
                 var recur = this.backTrack(assignment);
@@ -931,7 +1005,7 @@ csp.prototype.backTrack = function(assignment) {
                 this.stats.backtracks++;
                 this.stats.depth = 0;
             }
-        }
+        } else console.log('FUCK');
         // completely revert
         this.revert(inferences); // adds the edges back into the graph
     }
@@ -957,6 +1031,9 @@ csp.prototype.buildConstraintGraph = function() {
     var vertices = [];
     _.each(this.vMap, function(varNode){ vertices.push(varNode); });
 
+    var graph = new Graph(vertices);
+
+    // TODO rework this method
     for(var type in this.cMap){
         switch(parseInt(type)) {
             case UNARY: // no cycles, need only apply once
@@ -967,7 +1044,8 @@ csp.prototype.buildConstraintGraph = function() {
                 _.each(this.cMap[type], function(cc){
                     // for each node affected by it
                     _.each(cc.to, function(vertex){
-                        vertex.addConstraint(cc);
+                        graph.addEdge(cc);
+                        cc.interLock();
                     });
                 });
                 break;
@@ -976,38 +1054,8 @@ csp.prototype.buildConstraintGraph = function() {
         }
     }
 
-    var graph = new Graph(vertices); // REMOVED ConstraintGraph for now due to prototype conflict
+    this.graph = graph;
 }
-
-// Move into CSP, consolidate logic
-csp.prototype.buildDomainGraph = function() {
-    var source = new Vertex(null);
-    var sink = new Vertex(null);
-    
-    var vertices = []; // TODO create prototype chain and below:
-    /*
-     * ConstraintGraph object and FlowGraph will share the same
-     * Prototype object, and the two graphs will add vertices/edges
-     * to that object.  In this manner, the objects will be shared
-     * and in effect we will have two views of the same graph.
-     *
-     * consider: addDomainNode() --> which call this.addVertex(...)
-     * or this.prototype.addVertex() // seems unnecessary but I've seen this
-     */
-
-    var self = this;
-    _.each(this.vMap, function(varNode){
-        vertices.push(varNode); // add to graph collection
-        _.each(self.domain, function(valNode){
-            var ass = new Assignment(varNode, valNode);
-            varNode.addAssignment(ass); // TODO decide if adding assignment to vertex makes any sense at all
-            // More importantly is there a good way to share the edges efficiently so they are never reconstructed?
-        });
-    });
-
-    this.domainGraph = new BipartiteFlowGraph(source, sink, vertices, null);
-}
-
 
 // If function is passed, it will be a global revision function.
 // The revision argument will receive the extra parameter to check
@@ -1026,18 +1074,11 @@ var constraints = [
     [ ["kit-kat", "horse"], NEXT ],
     [ ["coffee", "green"], SAME ],
     [ ["milk"], VALUE, [3]],
-    [ people, ALL_DIFF ],
-    [ pets, ALL_DIFF ],
-    [ colors, ALL_DIFF ],
-    [ drinks, ALL_DIFF ],
-    [ candies, ALL_DIFF ]
-    /*
     [ people, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ pets, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ colors, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ drinks, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ],
     [ candies, ALL_DIFF, GLOBAL['ALLDIFF_REVISE'] ]
-    */
 ];
 
 var problem = new csp(variables, domain, constraints);
