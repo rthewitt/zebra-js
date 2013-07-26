@@ -279,7 +279,7 @@ var BipartiteFlowGraph = function(range, domain, source, reversedSink) {
         _.each(vars, function(variable){
             _.each(variable.domain, function(assn) { assn.capacity = 1; });
         });
-        //_.each(this.edges, function(e){if(e.capacity > 0) console.log('CAPACITY: '+e.capacity+' '+e);});
+        //_.each(this.edges, function(e){if(e.capacity > 0) count++; console.log('CAPACITY: '+e.capacity+' '+e);});
         //_.each(this.edges, function(e){ delete e.redge; });
         //debugger;
     };
@@ -384,17 +384,20 @@ BipartiteFlowGraph.prototype.selectValue = function(rangeNode, domainNode) {
     if(!edge) 
         throw "Could not find "+domainNode.info+" in the domain of "+rangeNode.info;
 
+    console.log('REMOVING: '+removed.join(', '));
+
     rangeNode.domain = _.difference(rangeNode.domain, removed);
 
     if(rangeNode.domain.length !== 1) 
         throw "Could not select "+domainNode.info+" from the domain of "+rangeNode.info;
 
-    return  [{ variable: rangeNode, edges: removed }]; // standard inference form
+    //return  [{ variable: rangeNode, edges: removed }];
+    return  removed; // changed standard inference form
 }
 
 var getConstraint = function(scope, rel, optional) {
     var type = (scope.length > 2 ? NARY : (scope.length < 2 ? UNARY : BINARY));
-    var from = scope[0]; // is this ever used?
+    var from = scope[0]; 
 
     var check;
     var opt = typeof optional;
@@ -493,7 +496,7 @@ function sortQ(a, b) {
 }
 
 function isInDomain(rangeNode, valNode) {
-    if(!rangeNode) 
+    if(!rangeNode)
         throw "Problem during domain check";
     return _.some(rangeNode.domain, function(assn){
         return assn.to[0] === valNode;
@@ -519,6 +522,8 @@ function queueAffectedNodes(Q, affected, justChecked) {
         });
     }
     Q.sort(sortQ);
+    var displayQ = _.map(Q, function(q){return '\n'+parseInt(q.type) + q.toString()}); // maybe will look ok?
+    console.log('\n\ndisplayQ: '+displayQ);
 }
 
 // Q will always be empty before performing the three additions.  
@@ -612,7 +617,10 @@ function initializeQueue(constraints, Q) {
      * Decompose graph into strongly connected components
      * Prune edges by removing component-bridges
     **/
+    // IMPORTANT:
+    // Return true if we want to revise, false if we want to skip revision, and FAILURE if we fail the constraint
     var ALL_DIFF = function(vars, passed) {
+        console.log('vars length: '+vars.length);
 
         passed.push(vars); // We will use these in our revision function to limit the component graph
 
@@ -631,7 +639,8 @@ function initializeQueue(constraints, Q) {
         var assigned = _.filter(vars, isAssigned);
         if(assigned.length === vars.length) {
             var allDiff = _.chain(vars).map(function(v){ return v.domain[0].to[0].info }).unique().value().length === vars.length;
-            return allDiff;
+            console.log('RETURING BYPASS!!!');
+            return allDiff ? false : FAILURE; // false means we skip the revision step
         } else {
 
         // Not all assigned: original function continues below
@@ -646,8 +655,8 @@ function initializeQueue(constraints, Q) {
         this.domainGraph.demote(vars); // safely cleans and prepares the graph state
         //var end = Date.now();
 
-
-        return maxFlow == vars.length; // perfect matching exists
+        // TODO HANDLE k-regular, where we should return false instead of true for efficiency
+        return (maxFlow == vars.length) || FAILURE; // perfect matching exists
 
         }
     }
@@ -662,6 +671,25 @@ function initializeQueue(constraints, Q) {
         //var start = Date.now();
         var components = this.domainGraph.getStrongComponents(vars); 
         console.log('components size: '+components.length);
+
+        /*
+        var csp = this;
+        var displayComp = [];
+        _.each(components, function(cmp){
+            var dsp = [];
+            _.each(cmp, function(id){
+                _.each(csp.graph.vertices, function(vert){
+                    if(vert.id === id)
+                        dsp.push(vert.info);
+                });
+            });
+            displayComp.push(dsp);
+        });
+        console.log('\n');
+        console.log(displayComp);
+        console.log('\n');
+        */
+
         if(components.length > 9) {
             console.log(components);
             throw 'what';
@@ -690,26 +718,15 @@ function initializeQueue(constraints, Q) {
                     console.log('SAFE TO REMOVE EDGE: ' + match);
                     match.from.domain = match.from.domain = _.without(match.from.domain, match);
                     deadEnd.push(match);
-                    /*
-                    for(var di=0; di<match.from.domain.length; di++) {
-                        var domainNode = match.from.domain[di];
-                        if(domainNode.id === match.id) 
-                            deadEnd.push(tt);
-                    }*/
+                    return match;
 
-                    return { variable: match.from, edges: deadEnd };
                 } else return undefined;
             }).compact().value();
         
 
         inferences.push.apply(inferences, inf);
 
-        /*
-        var str = _.map(inferences, function(ii){return ii.variable.info});
-        console.log('INFERENCES: ' +str);
-        */
-
-        return inferences.length > 0; // modified?
+        return inf.length > 0; // modified?
     }
 
 //#############################################
@@ -744,8 +761,9 @@ function ac3(csp, inferences) {
                 break;
             case NARY:
                     var reviseParams = [];
+                    console.log('CALLING ALL_DIFF: '+cnst);
                     var result = cnst.check.call(csp, cnst.to, reviseParams); // TODO ensure that this is the same statement as the BINARY/UNARY case (use a cycle if I have to)
-                if(result) {
+                if(result === true) {
                     if(cnst.global) { // constraint has a revision override
                         // We must pass inferences long to be modified
                         reviseParams.push(inferences); 
@@ -762,7 +780,8 @@ function ac3(csp, inferences) {
                                 queueAffectedNodes(Q, cnst.to, cnst);
                         } 
                     }// else console.warn('Constraint WILL NOT revise, nary currently requires revision override!');
-                } else return FAILURE; // failed the constraint
+                } else if(result === FAILURE) 
+                    return FAILURE; // failed the constraint
                 break;
             default:
                 break;
@@ -848,6 +867,9 @@ csp.prototype.solve = function() {
 function printSolution(sol) {
     var per=0,pet=1,col=2,drnk=3,cand=4;
 
+    for(var v in this.graph.vertices) 
+        console.log('\n NOASSIGNMENTCHECK '+this.graph.vertices[v].info);
+
     var houses = new Array(5);
     houses[per] = new Array(5);
     houses[pet] = new Array(5);
@@ -864,6 +886,8 @@ function printSolution(sol) {
                 else {
                     var varName = sol[v].info;
                     var houseNum = solvDomain[d].to[0].info-1;
+                    console.log('info: '+solvDomain[d].to[0].info);
+                    console.log('houseNum '+houseNum);
                     if(people.indexOf(varName) !== -1)
                         houses[houseNum][per] = varName;
                     else if(pets.indexOf(sol[v].info) !== -1)
@@ -902,6 +926,7 @@ csp.prototype.revise = function(cnst, inferences, params) {
     var pivotVar = params[0];
     var modified = false;
     // if no value for v2 exists in C(v1,v2), remove v1 from domaim
+    var removed = [];
     _.each(pivotVar.domain, function(assnEdge){
         var found=false;
         var pivotVal = assnEdge.to[0];
@@ -915,10 +940,15 @@ csp.prototype.revise = function(cnst, inferences, params) {
         }
         if(!found) {
             pivotVar.domain = _.without(pivotVar.domain, assnEdge);
-            inferences.push({variable: pivotVar, edges: [assnEdge]});
+            removed.push(assnEdge); // TODO remove, just for logging
+            inferences.push(assnEdge);
             modified = true;
         }
     });
+    if(modified) {
+        console.log('\nValues removed by constriant: '+cnst);
+        console.log(removed.join('\n'));
+    }
     return modified;
 }
 
@@ -930,10 +960,10 @@ csp.prototype.revert = function(inferences) {
     var cnt = 0;
     while(inferences.length > 0) {
         cnt++;
-        var inf = inferences.pop();
-        _.each(inf.edges, function(edge){inf.variable.domain.push(edge);});
+        var goodEdge = inferences.pop();
+        goodEdge.from.domain.push(goodEdge);
     }
-    if(cnt !== cnt) throw 'PROBABLY DIDN\'T REVERT ERROR';
+    if(cnt !== need) throw 'PROBABLY DIDN\'T REVERT ERROR';
 }
 
 // We want the variable with the smallest remaining domain
@@ -980,8 +1010,7 @@ csp.prototype.backTrack = function(assignment) {
 
     var considered = this.getMostConstrainedVar();
 
-    if(considered === null) 
-        return assignment;
+    if(!considered) return assignment;
 
     var inferences;
     // If we want to choose least constraining, we have to infer for every value first!!!
@@ -992,7 +1021,7 @@ csp.prototype.backTrack = function(assignment) {
             if(considered.info === 'yellow' && valNode.info === 5)
                 debugger;
             inferences = this.domainGraph.selectValue(considered, valNode);
-            var ret = this.infer(assignment, inferences);
+            var ret = this.infer(inferences);
             if(ret !== FAILURE) { 
                 console.log('RECURSING');
                 var recur = this.backTrack(assignment);
@@ -1003,7 +1032,7 @@ csp.prototype.backTrack = function(assignment) {
                 this.stats.depth = 0;
             }
         } //else console.log('Could not select '+valNode.info +' from domain of length '+considered.domain.length);
-        var d = _.map(inferences, function(ii){return ii.variable.info}).join(', ');
+        var d = _.map(inferences, function(ii){return ii.from.info + ' ' + ii.to[0].info}).join(', ');
         console.log('Reverting: \n'+d);
         // completely revert
         this.revert(inferences); // adds the edges back into the graph
@@ -1015,7 +1044,7 @@ csp.prototype.backTrack = function(assignment) {
     return FAILURE;
 }
 
-csp.prototype.infer = function(assignment, inferences) {
+csp.prototype.infer = function(inferences) {
     this.stats.inf++;
     return ac3.call(null, this, inferences);
 }
