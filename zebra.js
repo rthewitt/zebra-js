@@ -2,8 +2,6 @@
  *  Currently shrinking code-base and making it significatnly more efficient
  *  Experimented with comparing ALL_DIFF global/n-ary constraints,
  *  How I'm interested in exploring n-ary in general, possibly auto-conversion
- *
- *  TODO verify that forward checking on ALL_DIFF removes without given singular domain
  */
 
 
@@ -108,7 +106,6 @@ Graph.prototype = {
     addVertex: function(v) {
         if(this.vertices.indexOf(v) === -1) 
             this.vertices.push(v);
-        //else console.log('addVertex: blocked vertex ' + v.info);
     },
 
     addEdge: function(e) {
@@ -119,7 +116,7 @@ Graph.prototype = {
                     this.adj[e.from.id].push(e);
                 else this.adj[e.from.id] = [ e ];
             }
-        } //else console.log('Ignoring duplicate edge: ' + e);
+        }
     },
 }
 
@@ -325,7 +322,6 @@ BipartiteFlowGraph.prototype.selectValue = function(rangeNode, domainNode) {
 
     if(!edge) throw "Could not find "+domainNode.info+" in the domain of "+rangeNode.info;
 
-    // console.log('REMOVING: '+removed.join(', '));
     rangeNode.domain = _.difference(rangeNode.domain, removed);
 
     if(rangeNode.domain.length !== 1) 
@@ -452,8 +448,6 @@ function queueAffectedNodes(Q, affected, justChecked) {
         });
     }
     Q.sort(sortQ);
-    /*var displayQ = _.map(Q, function(q){return '\n'+parseInt(q.type) + q.toString()}); // maybe will look ok?
-    console.log('\n\ndisplayQ: '+displayQ); */
 }
 
 // Q will always be empty before performing the three additions.  
@@ -552,10 +546,7 @@ function initializeQueue(constraints, Q) {
 
 
     GLOBAL['ALLDIFF_REVISE'] = function(vars, inferences) {
-        if(!this.domainGraph || !inferences) {
-            console.error('MAJOR PROBLEM, GLOBAL CLOSURE NOT WORKING');
-            return [];
-        }
+        if(!this.domainGraph || !inferences) return [];
 
         var components = this.domainGraph.getStrongComponents(vars); 
 
@@ -597,7 +588,7 @@ function ac3(csp, inferences) {
     
     while(Q.length > 0) {
         var cnst = Q.shift();
-        if(typeof cnst === undefined) { // FIXME avoid pushing undefined arcs
+        if(typeof cnst === undefined) { 
             console.error('UNDEFINED ARC IN QUEUE!!!!');
             continue; 
         }
@@ -626,7 +617,7 @@ function ac3(csp, inferences) {
                             else 
                                 queueAffectedNodes(Q, cnst.to, cnst);
                         } 
-                    }// else console.warn('Constraint WILL NOT revise, nary currently requires revision override!');
+                    }
                 } else if(result === FAILURE) 
                     return FAILURE; // failed the constraint
                 break;
@@ -741,11 +732,6 @@ csp.prototype.revise = function(cnst, inferences, params) {
             modified = true;
         }
     });
-    /*
-    if(modified) {
-        console.log('\nValues removed by constriant: '+cnst);
-        console.log(removed.join('\n'));
-    } */
     return modified;
 }
 
