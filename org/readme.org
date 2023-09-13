@@ -16,9 +16,9 @@ The CSP began as a simple adjacency list of arrays, which represented the domain
 
 Days turned to into weeks as I began pouring over research in Constraint Programming and optimization.
 
-The Constraint Graph is represented as a (sometimes) directed acyclic hypergraph.  I use a Bipartite Flow graph representation to incorporate graph-theoretic solutions to the Global ALL_DIFF constraint, allowing me to perform arbitrarily strong consistency without resorting to an arity decomposition.
+The Constraint Graph is represented as a (sometimes) directed acyclic hypergraph.
 
-The optimizations involve elements of Flow Theory, Matching Theory and a convenient theorem involving Strongly Connected Components of graphs that feels like magic.
+I leverage a Bipartite Graph to incorporate the ~Max-Flow Min-Cut~ theorem, and implement a Global ALL_DIFF constraint.  This allows me to constrain many variables without decomposing that constraint into several weaker constraints.  Using a single constraint during the tree-search helps to prune the search space.
 
 The /code itself/ is not optimized, but written in an intuitive object-oriented style.
 
