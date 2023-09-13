@@ -52,21 +52,20 @@ Given a set of variables (people, pets, drinks, etc...), a block of houses, and 
 ** Solution
 
 
-| House       | 1         | 2         | 3          | 4        | 5          |
 | /           |   <       |           |            |          |            |
-| Color       | yellow    | blue      | red        | ivory    | green      |
-| Nationality | Norwegian | Ukrainian | Englishman | Spaniard | Japanese   |
-| Drinks      | water     | tea       | milk       | OJ       | coffee     |
-| Pet         | fox       | horse     | snail      | dog      | zebra      |
-| Eats        | kit-kat   | hershey   | smarties   | snickers | milkey-way |
+| House       | *1*         | *2*         | *3*          | *4*        | *5*          |
+| *Color*       | yellow    | blue      | red        | ivory    | green      |
+| *Nationality* | Norwegian | Ukrainian | Englishman | Spaniard | Japanese   |
+| *Drinks*      | water     | tea       | milk       | OJ       | coffee     |
+| *Pet*         | fox       | horse     | snail      | dog      | zebra      |
+| *Eats*        | kit-kat   | hershey   | smarties   | snickers | milkey-way |
 
 ** Results
 
-| Method                | Time       |
-|-----------------------+------------|
-| Naive Solution (2013) | 22 *seconds* |
-| Optimized (2013)      | 235 ms     |
-| Optimized (2023)      | 38 ms      |
+| Method         | i7-2920XM  | Ryzen 7 5700G |
+|----------------+------------+---------------|
+| Naive Solution | 22 *seconds* | 17 *seconds*    |
+| Optimized      | 235 ms     | 36ms          |
 
 
 
