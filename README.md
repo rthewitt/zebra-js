@@ -17,9 +17,9 @@ The CSP began as a simple adjacency list of arrays, which represented the domain
 
 Days turned to into weeks as I began pouring over research in Constraint Programming and optimization.
 
-The Constraint Graph is represented as a (sometimes) directed acyclic hypergraph.  I use a Bipartite Flow graph representation to incorporate graph-theoretic solutions to the Global ALL<sub>DIFF</sub> constraint, allowing me to perform arbitrarily strong consistency without resorting to an arity decomposition.
+The Constraint Graph is represented as a (sometimes) directed acyclic hypergraph.
 
-The optimizations involve elements of Flow Theory, Matching Theory and a convenient theorem involving Strongly Connected Components of graphs that feels like magic.
+I leverage a Bipartite Graph to incorporate the `Max-Flow Min-Cut` theorem, and implement a Global ALL<sub>DIFF</sub> constraint.  This allows me to constrain many variables without decomposing that constraint into several weaker constraints.  Using a single constraint during the tree-search helps to prune the search space.
 
 The *code itself* is not optimized, but written in an intuitive object-oriented style.
 
@@ -73,17 +73,17 @@ Given a set of variables (people, pets, drinks, etc&#x2026;), a block of houses,
 </colgroup>
 <tbody>
 <tr>
-<td class="org-left">House</td>
-<td class="org-left">1</td>
-<td class="org-left">2</td>
-<td class="org-left">3</td>
-<td class="org-left">4</td>
-<td class="org-left">5</td>
+<td class="org-left"><b>House</b></td>
+<td class="org-left"><b>1</b></td>
+<td class="org-left"><b>2</b></td>
+<td class="org-left"><b>3</b></td>
+<td class="org-left"><b>4</b></td>
+<td class="org-left"><b>5</b></td>
 </tr>
 
 
 <tr>
-<td class="org-left">Color</td>
+<td class="org-left"><b>Color</b></td>
 <td class="org-left">yellow</td>
 <td class="org-left">blue</td>
 <td class="org-left">red</td>
@@ -93,7 +93,7 @@ Given a set of variables (people, pets, drinks, etc&#x2026;), a block of houses,
 
 
 <tr>
-<td class="org-left">Nationality</td>
+<td class="org-left"><b>Nationality</b></td>
 <td class="org-left">Norwegian</td>
 <td class="org-left">Ukrainian</td>
 <td class="org-left">Englishman</td>
@@ -103,7 +103,7 @@ Given a set of variables (people, pets, drinks, etc&#x2026;), a block of houses,
 
 
 <tr>
-<td class="org-left">Drinks</td>
+<td class="org-left"><b>Drinks</b></td>
 <td class="org-left">water</td>
 <td class="org-left">tea</td>
 <td class="org-left">milk</td>
@@ -113,7 +113,7 @@ Given a set of variables (people, pets, drinks, etc&#x2026;), a block of houses,
 
 
 <tr>
-<td class="org-left">Pet</td>
+<td class="org-left"><b>Pet</b></td>
 <td class="org-left">fox</td>
 <td class="org-left">horse</td>
 <td class="org-left">snail</td>
@@ -123,7 +123,7 @@ Given a set of variables (people, pets, drinks, etc&#x2026;), a block of houses,
 
 
 <tr>
-<td class="org-left">Eats</td>
+<td class="org-left"><b>Eats</b></td>
 <td class="org-left">kit-kat</td>
 <td class="org-left">hershey</td>
 <td class="org-left">smarties</td>
@@ -143,30 +143,29 @@ Given a set of variables (people, pets, drinks, etc&#x2026;), a block of houses,
 <col  class="org-left" />
 
 <col  class="org-left" />
+
+<col  class="org-left" />
 </colgroup>
 <thead>
 <tr>
-<th scope="col" class="org-left">Method</th>
-<th scope="col" class="org-left">Time</th>
+<th scope="col" class="org-left"><b>Method</b></th>
+<th scope="col" class="org-left">i7-2920XM</th>
+<th scope="col" class="org-left">Ryzen 7 5700G</th>
 </tr>
 </thead>
 
 <tbody>
 <tr>
-<td class="org-left">Naive Solution (2013)</td>
-<td class="org-left">22 <b>seconds</b></td>
+<td class="org-left"><b>Naive Solution</b></td>
+<td class="org-left">22 seconds</td>
+<td class="org-left">17 seconds</td>
 </tr>
 
 
 <tr>
-<td class="org-left">Optimized (2013)</td>
+<td class="org-left"><b>Optimized</b></td>
 <td class="org-left">235 ms</td>
-</tr>
-
-
-<tr>
-<td class="org-left">Optimized (2023)</td>
-<td class="org-left">38 ms</td>
+<td class="org-left">36ms</td>
 </tr>
 </tbody>
 </table>
